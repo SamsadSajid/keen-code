@@ -352,7 +352,11 @@ func (c *BedrockClient) StreamChat(
 				Role:    brtypes.ConversationRoleAssistant,
 				Content: assistantBlocks,
 			})
-			toolResults, activities := c.executeTools(ctx, toolUses, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolResults, activities := c.executeTools(ctx, toolUses, execRegistry, eventCh)
 			msgParams = append(msgParams, brtypes.Message{Role: brtypes.ConversationRoleUser, Content: toolResults})
 			compactionHistory = append(compactionHistory, core.Message{
 				Role:       core.RoleAssistant,

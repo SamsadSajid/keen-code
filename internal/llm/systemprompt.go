@@ -56,11 +56,7 @@ const planModePrompt = `
 - For implementation or other changes, ask the user to switch with /mode build or Shift+Tab.
 - Provide concise plans, risks, and verification steps instead of changes.`
 
-const compactionPrompt = `Summarize the conversation concisely and completely so work can continue without earlier history.
-
-Use exactly these sections:
-
-## Goal
+const compactionSections = `## Goal
 User objectives.
 
 ## Key Instructions
@@ -74,6 +70,18 @@ Completed and remaining work, active progress, and next action.
 
 ## Relevant Files
 Relevant files, commands, errors, and tool results.`
+
+const compactionGuidance = `This is a context compaction request: the earlier history will be discarded and replaced by your reply, which becomes the only record carried forward.
+
+Never use any tools for this compaction request; work from the existing conversation history alone.
+
+Summarize concisely but completely so work can continue without the earlier history. Keep exact file paths, commands, identifiers, and error text, and do not reference the discarded history (no "as discussed" or "the file above").
+
+Cover at least the sections below, adding extra sections or detail when the work needs it:
+
+` + compactionSections
+
+const compactionPrompt = `Compact this conversation. ` + compactionGuidance
 
 const maxInstructionsSize = 8 * 1024
 
@@ -113,11 +121,15 @@ func Build(workingDir, skillsCatalog, subagentsCatalog string, mode AgentMode) s
 	return sb.String()
 }
 
+// BuildCompactionPrompt builds the manual compaction instruction sent as the final user message.
 func BuildCompactionPrompt(extraPrompt string) string {
+	instruction := `Please compact this conversation. ` + compactionGuidance + `
+
+Respond with only the structured summary, with no preamble.`
 	if trimmed := strings.TrimSpace(extraPrompt); trimmed != "" {
-		return compactionPrompt + "\n\nIMPORTANT! User has provided a specific instruction. So take it into consideration: " + trimmed
+		instruction += "\n\nIMPORTANT: Take the following instruction into consideration: " + trimmed
 	}
-	return compactionPrompt
+	return instruction
 }
 
 func BuildAutoCompactionPrompt() string {

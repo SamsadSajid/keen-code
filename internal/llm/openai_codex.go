@@ -185,7 +185,11 @@ func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []core.Mess
 			}
 
 			input = append(input, responseOutputInputs(completed.Output, toolCalls, streamedContent)...)
-			toolResults, activities := c.executeTools(ctx, toolCalls, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolResults, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)
 			input = append(input, toolResults...)
 			content := completed.OutputText()
 			compactionHistory = append(compactionHistory, core.Message{

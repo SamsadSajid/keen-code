@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/mochow13/keen-code/internal/llm/compress"
@@ -57,6 +58,30 @@ func executeTool(ctx context.Context, registry *tools.Registry, name string, inp
 		Err:       err,
 		Activity:  historicalToolActivity(name, input, rawOutput, llmOutput, err),
 	}
+}
+
+const toolCallsDisabledMessage = "Tool calls are disabled during compaction; use the history."
+
+// denyToolRegistry preserves the tool definitions but rejects execution.
+func denyToolRegistry(registry *tools.Registry) *tools.Registry {
+	if registry == nil {
+		return nil
+	}
+	denied := tools.NewRegistry()
+	for _, tool := range registry.All() {
+		_ = denied.Register(&deniedTool{Tool: tool})
+	}
+	return denied
+}
+
+type deniedTool struct {
+	tools.Tool
+}
+
+func (d *deniedTool) ValidateInput(context.Context, any) error { return nil }
+
+func (d *deniedTool) Execute(context.Context, any) (any, error) {
+	return nil, errors.New(toolCallsDisabledMessage)
 }
 
 func executeValidatedTool(

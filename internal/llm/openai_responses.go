@@ -333,7 +333,11 @@ func (c *OpenAIResponsesClient) StreamChat(
 			}
 
 			input = append(input, responseOutputInputs(completed.Output, toolCalls, streamedContent)...)
-			toolResults, activities := c.executeTools(ctx, toolCalls, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolResults, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)
 			input = append(input, toolResults...)
 			compactionHistory = append(compactionHistory, core.Message{
 				Role:       core.RoleAssistant,

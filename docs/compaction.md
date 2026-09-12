@@ -69,7 +69,7 @@ Completed and remaining work, active progress, and next action.
 Relevant files, commands, errors, and tool results.
 ```
 
-The shared prompt is built by `llm.BuildCompactionPrompt`. Automatic compaction adds an internal-checkpoint instruction through `llm.BuildAutoCompactionPrompt`.
+The shared `compactionGuidance` (in `internal/llm/systemprompt.go`) feeds both `llm.BuildCompactionPrompt` (manual; sent as the final user message) and `llm.BuildAutoCompactionPrompt` (automatic; sent as the system prompt). Both frame the request as a context compaction whose reply replaces the conversation history, ask the model never to use tools and to work from the existing conversation history alone, demand exact file paths, commands, identifiers, and error text with no references to the discarded history, and present the sections above as a baseline: extra sections and additional detail are allowed when the conversation calls for them. Manual compaction additionally enforces the no-tools guidance: a tool call the model attempts is rejected with a tool-error result instead of being executed.
 
 Automatic summaries additionally:
 
@@ -99,10 +99,10 @@ AppState snapshots persisted conversation history
         |
         v
 Build manual compaction request
-  - compaction system prompt
+  - normal agent system prompt
   - conversation snapshot
-  - final summarize instruction
-  - no tools
+  - final summarize instruction as a user message
+  - same tools retained; attempted tool calls rejected with a tool-error result
         |
         v
 Stream summary visibly in the REPL
@@ -123,11 +123,11 @@ Persist compaction_applied session event
 
 `AppState.StreamCompact` sends:
 
-1. a `RoleSystem` message containing `BuildCompactionPrompt(extraPrompt)`;
+1. the same `RoleSystem` message as a regular turn (`llm.Build` with current project instructions, skills, subagents, memory, and agent mode);
 2. a clone of current AppState messages;
-3. a final user instruction requesting the continuation summary.
+3. a final `RoleUser` message containing `BuildCompactionPrompt(extraPrompt)`.
 
-The request has no tools. Unlike automatic compaction, the summary is rendered as a normal visible stream.
+The request also sets `StreamOptions.DisableToolCalls` and `StreamOptions.DisableAutoCompaction`. Disabling tool calls rejects any tool the model attempts with a tool-error result — `Tool calls are disabled during compaction; use the history.` — emitted as a tool card in the transcript and returned to the model, which then continues from the existing history. At the execution step the client swaps in a denying tool registry whose tools accept any input but reject execution with that message, so no tool runs and no permission prompt appears. Disabling auto-compaction stops a nested automatic compaction from firing underneath the in-flight manual compaction (tool turns keep the stream running, so a threshold crossing is reachable). Keeping the system prompt, history, and tool definitions identical to the previous turn lets provider prompt caches (KV cache) reuse the conversation prefix instead of reprocessing it. The applied summary uses only the assistant text produced after the last tool activity, so pre-tool preamble is not folded into it. Unlike automatic compaction, the summary is rendered as a normal visible stream.
 
 ### Applying the result
 
@@ -385,9 +385,9 @@ The earlier assistant checkpoint remains available in the transcript for UI repl
 | Trigger | Explicit slash command | 90% proactive threshold or local hard-budget failure |
 | Runs inside parent turn | No | Yes |
 | Summary visibility | Visible | Private |
-| Tools in summary request | None | None |
+| Tools in summary request | Same registry; attempted calls rejected with a tool-error result | None |
 | Latest user message | Summarized with history | Retained verbatim outside summary |
-| System prompt during summary | Dedicated compaction prompt | Dedicated automatic compaction prompt |
+| System prompt during summary | Normal agent system prompt (reuses prompt cache) | Dedicated automatic compaction prompt |
 | Parent tools after compaction | Recreated on next normal turn | Preserved and reused immediately |
 | `Esc` behavior | Cancels manual compaction | Cancels only child compactor |
 | Replacement in AppState | One `RoleUser` summary | System-free automatic replacement |
@@ -399,9 +399,9 @@ The earlier assistant checkpoint remains available in the transcript for UI repl
 
 | Area | Files |
 |---|---|
-| Shared prompts and compactor | `internal/llm/systemprompt.go`, `internal/llm/auto_compaction.go` |
+| Shared prompts and compactor | `internal/llm/systemprompt.go`, `internal/llm/tool_execution.go`, `internal/llm/auto_compaction.go` |
 | Budgeting and context reduction | `internal/llm/context_reducer.go` |
-| Lifecycle event contract | `internal/llm/message.go`, `internal/llm/client.go` |
+| Lifecycle event contract | `internal/llm/core/message.go`, `internal/llm/client.go` |
 | Provider loops | `internal/llm/openai.go`, `openai_responses.go`, `openai_codex.go`, `anthropic.go`, `genkit.go`, `bedrock.go` |
 | Manual AppState flow | `internal/cli/repl/appstate/state.go`, `internal/cli/repl/command_handlers.go` |
 | Interactive automatic handling | `internal/cli/repl/handlers.go`, `internal/cli/repl/stream_handler.go` |

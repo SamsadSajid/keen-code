@@ -499,6 +499,78 @@ func TestAnthropicClient_StreamChat_ToolInvocation(t *testing.T) {
 	}
 }
 
+func TestAnthropicClient_DisableToolCallsRejectsToolUse(t *testing.T) {
+	callCount := 0
+	var seenParams []anthropic.MessageNewParams
+
+	firstEvents := []anthropic.MessageStreamEventUnion{
+		makeToolUseStartEvent(0, "toolu_01", "success_tool"),
+		makeInputJSONDeltaEvent(0, `{"message":"hello"}`),
+		makeContentBlockStopEvent(0),
+	}
+	secondEvents := []anthropic.MessageStreamEventUnion{
+		makeTextDeltaEvent(0, "summary from history"),
+		makeContentBlockStopEvent(0),
+	}
+
+	c := &AnthropicClient{model: "claude-sonnet-4-6"}
+	c.streamImpl = func(ctx context.Context, params anthropic.MessageNewParams, opts ...option.RequestOption) anthropicStream {
+		callCount++
+		seenParams = append(seenParams, params)
+		if callCount == 1 {
+			return &mockAnthropicStream{events: firstEvents}
+		}
+		return &mockAnthropicStream{events: secondEvents}
+	}
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(&successTool{}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "summarize"}}, registry, core.StreamOptions{DisableToolCalls: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var toolEnds []core.ToolCall
+	var text string
+	for event := range eventCh {
+		switch event.Type {
+		case core.StreamEventTypeChunk:
+			text += event.Content
+		case core.StreamEventTypeToolEnd:
+			toolEnds = append(toolEnds, *event.ToolCall)
+		case core.StreamEventTypeError:
+			t.Fatalf("unexpected error: %v", event.Error)
+		}
+	}
+
+	if callCount != 2 {
+		t.Fatalf("expected 2 stream calls, got %d", callCount)
+	}
+	if len(toolEnds) != 1 || toolEnds[0].Error != toolCallsDisabledMessage || toolEnds[0].Output != nil {
+		t.Fatalf("expected a rejected tool end without output, got %#v", toolEnds)
+	}
+	if text != "summary from history" {
+		t.Fatalf("expected summary after rejection, got %q", text)
+	}
+	if len(seenParams) != 2 || len(seenParams[1].Messages) != 3 {
+		t.Fatalf("expected user, assistant, and tool-result messages, got %#v", seenParams)
+	}
+	resultMessage := seenParams[1].Messages[2]
+	if len(resultMessage.Content) != 1 || resultMessage.Content[0].OfToolResult == nil {
+		t.Fatalf("expected tool result content, got %#v", resultMessage.Content)
+	}
+	body, err := json.Marshal(seenParams[1])
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	if !strings.Contains(string(body), toolCallsDisabledMessage) {
+		t.Fatalf("expected rejection message in follow-up request, got %s", string(body))
+	}
+}
+
 func TestAnthropicClient_StreamChat_PreservesThinkingBlocksForToolContinuation(t *testing.T) {
 	callCount := 0
 	var seenParams []anthropic.MessageNewParams

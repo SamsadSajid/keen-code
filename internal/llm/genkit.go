@@ -319,7 +319,11 @@ func (c *GenkitClient) StreamChat(
 
 			aiMessages = append(aiMessages, modelResponse.Message)
 
-			toolResponseParts, activities := c.executeTools(ctx, toolRequests, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolResponseParts, activities := c.executeTools(ctx, toolRequests, execRegistry, eventCh)
 			if len(toolResponseParts) > 0 {
 				toolMsg := &ai.Message{
 					Role:    ai.RoleTool,

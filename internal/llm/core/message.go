@@ -160,6 +160,7 @@ type StreamOptions struct {
 	SessionID             string
 	OneShot               bool
 	DisableAutoCompaction bool
+	DisableToolCalls      bool
 }
 
 type ToolCall struct {

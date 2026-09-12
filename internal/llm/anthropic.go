@@ -759,7 +759,11 @@ func (c *AnthropicClient) StreamChat(
 
 			msgParams = append(msgParams, anthropic.NewAssistantMessage(assistantBlocks...))
 
-			toolResultBlocks, activities := c.executeTools(ctx, toolUses, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolResultBlocks, activities := c.executeTools(ctx, toolUses, execRegistry, eventCh)
 			msgParams = append(msgParams, anthropic.NewUserMessage(toolResultBlocks...))
 			compactionHistory = append(compactionHistory, core.Message{
 				Role:       core.RoleAssistant,

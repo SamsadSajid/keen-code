@@ -586,7 +586,11 @@ func (c *OpenAICompatibleClient) StreamChat(
 				OfAssistant: &assistant,
 			})
 
-			toolMsgs, activities := c.executeTools(ctx, toolCalls, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolMsgs, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)
 			if len(toolMsgs) > 0 {
 				oaiMessages = append(oaiMessages, toolMsgs...)
 			}

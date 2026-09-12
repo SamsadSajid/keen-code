@@ -133,3 +133,67 @@ func (t *readFileMetadataTool) Execute(_ context.Context, _ any) (any, error) {
 	}
 	return t.output, nil
 }
+
+func TestDenyToolRegistry_RejectsExecutionAndSkipsValidation(t *testing.T) {
+	tool := &validatingExecutionTool{}
+	registry := tools.NewRegistry()
+	if err := registry.Register(tool); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	denied := denyToolRegistry(registry)
+	deniedTool, ok := denied.Get(tool.Name())
+	if !ok {
+		t.Fatal("expected tool to remain registered")
+	}
+	if deniedTool.Name() != tool.Name() {
+		t.Fatalf("expected tool name %q, got %q", tool.Name(), deniedTool.Name())
+	}
+
+	if err := tools.ValidateInput(context.Background(), deniedTool, map[string]any{}); err != nil {
+		t.Fatalf("denied tools must not validate input, got %v", err)
+	}
+
+	if _, err := deniedTool.Execute(context.Background(), map[string]any{"value": "ok"}); err == nil || err.Error() != toolCallsDisabledMessage {
+		t.Fatalf("expected rejection error, got %v", err)
+	}
+	if tool.executed {
+		t.Fatal("denied tool must not execute the real tool")
+	}
+}
+
+func TestDenyToolRegistry_NilRegistry(t *testing.T) {
+	if got := denyToolRegistry(nil); got != nil {
+		t.Fatalf("expected nil registry, got %#v", got)
+	}
+}
+
+func TestDenyToolRegistry_ExecutionEmitsRejectedToolEnd(t *testing.T) {
+	tool := &validatingExecutionTool{}
+	registry := tools.NewRegistry()
+	if err := registry.Register(tool); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+	events := make(chan core.StreamEvent, 2)
+
+	execution := executeTool(context.Background(), denyToolRegistry(registry), tool.Name(), map[string]any{"value": "ok"}, events)
+
+	if execution.Err == nil || execution.Err.Error() != toolCallsDisabledMessage {
+		t.Fatalf("expected rejection error, got %v", execution.Err)
+	}
+	if execution.Activity.Status != "error" {
+		t.Fatalf("expected error activity, got %#v", execution.Activity)
+	}
+
+	start := <-events
+	if start.Type != core.StreamEventTypeToolStart {
+		t.Fatalf("expected tool start, got %q", start.Type)
+	}
+	end := <-events
+	if end.Type != core.StreamEventTypeToolEnd {
+		t.Fatalf("expected tool end, got %q", end.Type)
+	}
+	if end.ToolCall.Error != toolCallsDisabledMessage || end.ToolCall.Output != nil {
+		t.Fatalf("unexpected rejected tool end: %#v", end.ToolCall)
+	}
+}

@@ -13,8 +13,6 @@ import (
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
-const compactionUserInstruction = "Please compact this conversation according to the system instructions."
-
 type AppState struct {
 	messages        []core.Message
 	llmClient       llm.LLMClient
@@ -180,12 +178,15 @@ func (s *AppState) StreamChat(ctx context.Context, cfg *config.ResolvedConfig, o
 	if s.llmClient == nil {
 		return nil, nil
 	}
-	systemMsg := core.Message{
+	messages := append([]core.Message{s.systemPromptMessage()}, s.GetMessages()...)
+	return s.llmClient.StreamChat(ctx, messages, s.EffectiveToolRegistry(), opts...)
+}
+
+func (s *AppState) systemPromptMessage() core.Message {
+	return core.Message{
 		Role:    core.RoleSystem,
 		Content: llm.Build(s.workingDir, s.SkillsCatalog(), s.SubagentsCatalog(), s.mode),
 	}
-	messages := append([]core.Message{systemMsg}, s.GetMessages()...)
-	return s.llmClient.StreamChat(ctx, messages, s.EffectiveToolRegistry(), opts...)
 }
 
 func (s *AppState) buildCompactionRequest(cfg *config.ResolvedConfig, extraPrompt string) ([]core.Message, error) {
@@ -201,24 +202,24 @@ func (s *AppState) buildCompactionRequest(cfg *config.ResolvedConfig, extraPromp
 
 	snapshot := s.GetMessages()
 	requestMessages := make([]core.Message, 0, len(snapshot)+2)
-	requestMessages = append(requestMessages, core.Message{
-		Role:    core.RoleSystem,
-		Content: llm.BuildCompactionPrompt(extraPrompt),
-	})
+	requestMessages = append(requestMessages, s.systemPromptMessage())
 	requestMessages = append(requestMessages, snapshot...)
 	requestMessages = append(requestMessages, core.Message{
 		Role:    core.RoleUser,
-		Content: compactionUserInstruction,
+		Content: llm.BuildCompactionPrompt(extraPrompt),
 	})
 	return requestMessages, nil
 }
 
-func (s *AppState) StreamCompact(ctx context.Context, cfg *config.ResolvedConfig, extraPrompt string, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
+func (s *AppState) StreamCompact(ctx context.Context, cfg *config.ResolvedConfig, extraPrompt string, opts core.StreamOptions) (<-chan core.StreamEvent, error) {
 	requestMessages, err := s.buildCompactionRequest(cfg, extraPrompt)
 	if err != nil || requestMessages == nil {
 		return nil, err
 	}
-	return s.llmClient.StreamChat(ctx, requestMessages, nil, opts...)
+	// Keep the request prefix identical to a regular turn so provider prompt caches stay warm.
+	opts.DisableToolCalls = true
+	opts.DisableAutoCompaction = true
+	return s.llmClient.StreamChat(ctx, requestMessages, s.EffectiveToolRegistry(), opts)
 }
 
 func (s *AppState) StreamBtw(ctx context.Context, question string, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {

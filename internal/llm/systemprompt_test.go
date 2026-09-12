@@ -219,4 +219,43 @@ func TestBuildCompactionPromptTrimsExtraInstruction(t *testing.T) {
 	if !strings.Contains(got, "preserve failures") || strings.Contains(got, "  preserve failures  ") {
 		t.Fatalf("BuildCompactionPrompt() = %q", got)
 	}
+	for _, expected := range []string{
+		"Please compact this conversation",
+		"context compaction request",
+		"only record carried forward",
+		"Never use any tools for this compaction request",
+		"work from the existing conversation history alone",
+		"Cover at least the sections",
+		"## Goal",
+		"## Relevant Files",
+	} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("expected %q in compaction prompt, got %q", expected, got)
+		}
+	}
+	for _, unexpected := range []string{"Use exactly these sections"} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("expected %q to be absent from compaction prompt, got %q", unexpected, got)
+		}
+	}
+}
+
+func TestBuildAutoCompactionPromptSharesCompactionFraming(t *testing.T) {
+	got := BuildAutoCompactionPrompt()
+	for _, expected := range []string{
+		"Compact this conversation",
+		"context compaction request",
+		"only record carried forward",
+		"Never use any tools for this compaction request",
+		"Cover at least the sections",
+		"## Relevant Files",
+		"internal agent checkpoint",
+	} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("expected %q in automatic compaction prompt, got %q", expected, got)
+		}
+	}
+	if strings.Contains(got, "Use exactly these sections") {
+		t.Fatalf("expected flexible sections in automatic compaction prompt, got %q", got)
+	}
 }

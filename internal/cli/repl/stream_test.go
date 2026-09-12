@@ -319,6 +319,57 @@ func TestStreamHandler_HandleDone_AdjacentToolStartEnd_CollapsedToOneLine(t *tes
 	}
 }
 
+func TestFinalAssistantRun(t *testing.T) {
+	segments := []streamSegment{
+		{kind: segmentReasoning, content: "thinking"},
+		{kind: segmentAssistant, content: "Let me check the config first."},
+		{kind: segmentToolStart, toolCall: &core.ToolCall{Name: "read_file"}},
+		{kind: segmentToolEnd, toolCall: &core.ToolCall{Name: "read_file"}},
+		{kind: segmentAssistant, content: "## Goal\nShip it."},
+	}
+	if got := finalAssistantRun(segments); got != "## Goal\nShip it." {
+		t.Fatalf("finalAssistantRun() = %q", got)
+	}
+
+	noTools := []streamSegment{{kind: segmentAssistant, content: "whole response"}}
+	if got := finalAssistantRun(noTools); got != "whole response" {
+		t.Fatalf("finalAssistantRun() = %q", got)
+	}
+
+	noTrailingText := []streamSegment{{kind: segmentToolEnd, toolCall: &core.ToolCall{Name: "grep"}}}
+	if got := finalAssistantRun(noTrailingText); got != "" {
+		t.Fatalf("expected empty final run, got %q", got)
+	}
+}
+
+func TestHasNonTextActivity(t *testing.T) {
+	cases := []struct {
+		name     string
+		segments []streamSegment
+		want     bool
+	}{
+		{name: "empty"},
+		{name: "assistant only", segments: []streamSegment{{kind: segmentAssistant, content: "text"}}},
+		{name: "reasoning only", segments: []streamSegment{{kind: segmentReasoning, content: "thinking"}}},
+		{name: "reasoning and assistant", segments: []streamSegment{{kind: segmentReasoning}, {kind: segmentAssistant, content: "text"}}},
+		{name: "tool start", segments: []streamSegment{{kind: segmentToolStart}}, want: true},
+		{name: "tool end", segments: []streamSegment{{kind: segmentToolEnd}}, want: true},
+		{name: "bash", segments: []streamSegment{{kind: segmentBash}}, want: true},
+		{name: "permission", segments: []streamSegment{{kind: segmentPermission}}, want: true},
+		{name: "diff", segments: []streamSegment{{kind: segmentDiff}}, want: true},
+		{name: "subagent", segments: []streamSegment{{kind: segmentSubagent}}, want: true},
+		{name: "ask user", segments: []streamSegment{{kind: segmentAskUser}}, want: true},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasNonTextActivity(tt.segments); got != tt.want {
+				t.Fatalf("hasNonTextActivity() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStreamHandler_ReadFileNotFoundIsHidden(t *testing.T) {
 	sh := NewStreamHandler(nil)
 	sh.Start(make(<-chan core.StreamEvent), "Loading...")

@@ -877,6 +877,68 @@ func TestHandleCompactionDone_StopsCompactionAndRefreshesOutput(t *testing.T) {
 	}
 }
 
+func TestHandleCompactionDone_RejectsPreToolPreambleWithoutSummary(t *testing.T) {
+	m := newTestModel()
+	m.compaction.active = true
+	m.loading.showSpinner = true
+	m.compaction.cancel = func() {}
+	m.stream.handler.Start(make(chan core.StreamEvent), "Compacting...")
+	m.stream.handler.HandleChunk("I'll inspect the file.")
+	m.stream.handler.HandleToolStart(&core.ToolCall{Name: "glob", Input: map[string]any{"pattern": "*.go"}})
+	m.stream.handler.HandleToolEnd(&core.ToolCall{Name: "glob", Error: "Tool calls are disabled during compaction; use the history."})
+
+	newM, _ := m.handleCompactionDone()
+
+	if newM.compaction.active || newM.loading.showSpinner || newM.compaction.cancel != nil {
+		t.Fatal("failed compaction did not reset state")
+	}
+	if messages := newM.appState.GetMessages(); len(messages) != 0 {
+		t.Fatalf("expected pre-tool preamble not to replace history, got %#v", messages)
+	}
+	if got := newM.output.Join(); !strings.Contains(got, "Compaction failed: compaction returned empty summary") {
+		t.Fatalf("expected empty-summary failure, got %q", got)
+	}
+}
+
+func TestHandleCompactionDone_AppliesOnlyFinalAssistantRun(t *testing.T) {
+	m := newTestModel()
+	m.compaction.active = true
+	m.loading.showSpinner = true
+	m.compaction.cancel = func() {}
+	m.stream.handler.Start(make(chan core.StreamEvent), "Compacting...")
+	m.stream.handler.HandleChunk("Let me check the config first. ")
+	m.stream.handler.HandleToolStart(&core.ToolCall{Name: "glob", Input: map[string]any{"pattern": "*.go"}})
+	m.stream.handler.HandleToolEnd(&core.ToolCall{Name: "glob"})
+	m.stream.handler.HandleChunk("## Goal\nShip the fix.")
+
+	newM, _ := m.handleCompactionDone()
+
+	compacted := newM.appState.GetMessages()
+	if len(compacted) != 1 || compacted[0].Role != core.RoleUser || compacted[0].Content != "## Goal\nShip the fix." {
+		t.Fatalf("expected only the final assistant run to replace history, got %#v", compacted)
+	}
+}
+
+func TestHandleLLMIncomplete_RoutesManualCompactionFailure(t *testing.T) {
+	m := newTestModel()
+	m.compaction = compactionState{active: true, mode: compactionManual, cancel: func() {}}
+	m.loading.showSpinner = true
+	m.stream.handler.Start(make(chan core.StreamEvent), "Compacting...")
+	m.stream.handler.HandleChunk("I'll inspect the file.")
+
+	newM, _ := m.handleLLMIncomplete(errors.New("stream ended after tool turns"))
+
+	if newM.compaction.active || newM.compaction.cancel != nil || newM.loading.showSpinner {
+		t.Fatal("incomplete compaction did not reset state")
+	}
+	if messages := newM.appState.GetMessages(); len(messages) != 0 {
+		t.Fatalf("expected no summary to replace history, got %#v", messages)
+	}
+	if got := newM.output.Join(); !strings.Contains(got, "Compaction failed: stream ended after tool turns") {
+		t.Fatalf("expected compaction failure status, got %q", got)
+	}
+}
+
 func TestHandleCompactionError_CancelledShowsSoftMessage(t *testing.T) {
 	m := newTestModel()
 	m.compaction.active = true
