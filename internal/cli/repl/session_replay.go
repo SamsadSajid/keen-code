@@ -3,12 +3,12 @@ package repl
 import (
 	"encoding/json"
 	"errors"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"time"
 
 	replmarkdown "github.com/mochow13/keen-code/internal/cli/repl/markdown"
 	reploutput "github.com/mochow13/keen-code/internal/cli/repl/output"
 	repltheme "github.com/mochow13/keen-code/internal/cli/repl/theme"
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/session"
 	"github.com/mochow13/keen-code/internal/tools"
 )
@@ -187,7 +187,7 @@ func replayBashPayload(handler *StreamHandler, payload *session.BashPayload) {
 	}
 
 	handler.HandleBashStart(payload.Command, payload.Summary)
-	handler.HandleBashEnd(&llm.ToolCall{
+	handler.HandleBashEnd(&core.ToolCall{
 		Name:     tools.BashToolName,
 		Output:   map[string]any{"stdout": payload.Output},
 		Error:    payload.Error,

@@ -1,12 +1,11 @@
 package session
 
 import (
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/mochow13/keen-code/internal/llm"
 )
 
 func TestSanitizeWorkingDir(t *testing.T) {
@@ -32,8 +31,8 @@ func TestBuildConversation_ReplacesOnCompaction(t *testing.T) {
 			Kind: KindCompactionApplied,
 			CompactionApplied: &CompactionAppliedPayload{
 				Status: "Context compacted.",
-				Messages: []llm.Message{
-					{Role: llm.RoleUser, Content: "summary"},
+				Messages: []core.Message{
+					{Role: core.RoleUser, Content: "summary"},
 				},
 			},
 		},
@@ -77,7 +76,7 @@ func TestStoreCreateAppendListLoad(t *testing.T) {
 		Kind: KindAssistantTurn,
 		AssistantTurn: &AssistantTurnPayload{
 			Message: "hi",
-			TurnMemory: &llm.TurnMemory{ToolActivity: []llm.HistoricalToolActivity{{
+			TurnMemory: &core.TurnMemory{ToolActivity: []core.HistoricalToolActivity{{
 				Tool:           "ask_user",
 				Input:          map[string]any{"questions": []any{map[string]any{"question": "Database?"}}},
 				Status:         "success",
@@ -135,7 +134,7 @@ func TestStoreAppendBatch_AtomicallyAppendsSequentialEvents(t *testing.T) {
 
 	err = store.AppendBatch(session, []Event{
 		{Kind: KindAssistantTurn, AssistantTurn: &AssistantTurnPayload{Message: "checkpoint"}},
-		{Kind: KindCompactionApplied, CompactionApplied: &CompactionAppliedPayload{Messages: []llm.Message{{Role: llm.RoleUser, Content: "summary"}}}},
+		{Kind: KindCompactionApplied, CompactionApplied: &CompactionAppliedPayload{Messages: []core.Message{{Role: core.RoleUser, Content: "summary"}}}},
 	})
 	if err != nil {
 		t.Fatalf("AppendBatch() error = %v", err)

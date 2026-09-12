@@ -1,4 +1,4 @@
-package llm
+package core
 
 import "time"
 
@@ -154,6 +154,12 @@ type StreamEvent struct {
 	Usage          *TokenUsage
 	Attempt        int
 	AutoCompaction *AutoCompactionEvent
+}
+
+type StreamOptions struct {
+	SessionID             string
+	OneShot               bool
+	DisableAutoCompaction bool
 }
 
 type ToolCall struct {

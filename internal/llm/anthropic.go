@@ -14,6 +14,12 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/compaction"
+	"github.com/mochow13/keen-code/internal/llm/contextreduce"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/history"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
+	"github.com/mochow13/keen-code/internal/llm/retry"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -62,7 +68,7 @@ func (s *sdkAnthropicStream) Close() error {
 
 type AnthropicClient struct {
 	client                  anthropic.Client
-	provider                Provider
+	provider                providerconfig.Provider
 	model                   string
 	thinkingEffort          string
 	maxRetries              int
@@ -72,7 +78,7 @@ type AnthropicClient struct {
 	headers                 map[string]string
 }
 
-func NewAnthropicClient(cfg *ClientConfig) (*AnthropicClient, error) {
+func NewAnthropicClient(cfg *providerconfig.ClientConfig) (*AnthropicClient, error) {
 	var opts []option.RequestOption
 	opts = append(opts, option.WithAPIKey(cfg.APIKey))
 	if cfg.APIKeyHelper != "" {
@@ -90,7 +96,7 @@ func NewAnthropicClient(cfg *ClientConfig) (*AnthropicClient, error) {
 		provider:                cfg.Provider,
 		model:                   cfg.Model,
 		thinkingEffort:          cfg.ThinkingEffort,
-		maxRetries:              retryCount(cfg.MaxRetries),
+		maxRetries:              retry.Count(cfg.MaxRetries),
 		contextWindowTokenCount: cfg.ContextWindowTokens,
 		headers:                 cfg.Headers,
 	}
@@ -101,14 +107,14 @@ func NewAnthropicClient(cfg *ClientConfig) (*AnthropicClient, error) {
 	return c, nil
 }
 
-func anthropicBaseURL(provider Provider, configured string) string {
+func anthropicBaseURL(provider providerconfig.Provider, configured string) string {
 	if configured != "" {
 		return configured
 	}
-	if provider == Provider(config.ProviderOpenCodeGo) {
+	if provider == providerconfig.Provider(config.ProviderOpenCodeGo) {
 		return openCodeGoBaseURL
 	}
-	if provider == Provider(config.ProviderMiniMax) {
+	if provider == providerconfig.Provider(config.ProviderMiniMax) {
 		return miniMaxBaseURL
 	}
 	return ""
@@ -149,27 +155,27 @@ func formatAnthropicTurnInput(system []anthropic.TextBlockParam, messages []anth
 	return input.String()
 }
 
-func toAnthropicMessages(messages []Message) ([]anthropic.TextBlockParam, []anthropic.MessageParam) {
+func toAnthropicMessages(messages []core.Message) ([]anthropic.TextBlockParam, []anthropic.MessageParam) {
 	var systemBlocks []anthropic.TextBlockParam
 	var msgParams []anthropic.MessageParam
 
 	for messageIndex, m := range messages {
-		content := FormatMessageForProvider(m)
+		content := history.FormatMessage(m)
 		switch m.Role {
-		case RoleSystem:
+		case core.RoleSystem:
 			systemBlocks = append(systemBlocks, anthropic.TextBlockParam{Text: content})
-		case RoleUser:
+		case core.RoleUser:
 			if content != "" {
 				msgParams = append(msgParams, anthropic.NewUserMessage(anthropic.NewTextBlock(content)))
 			}
-		case RoleAssistant:
-			for _, step := range historicalMessageSteps(messageIndex, m) {
+		case core.RoleAssistant:
+			for _, step := range history.MessageSteps(messageIndex, m) {
 				blocks := make([]anthropic.ContentBlockParamUnion, 0, len(step.Activities)+1)
 				if step.Text != "" {
 					blocks = append(blocks, anthropic.NewTextBlock(step.Text))
 				}
 				for _, invocation := range step.Activities {
-					blocks = append(blocks, anthropic.NewToolUseBlock(invocation.ID, json.RawMessage(historicalToolArguments(invocation.Activity)), invocation.Activity.Tool))
+					blocks = append(blocks, anthropic.NewToolUseBlock(invocation.ID, json.RawMessage(history.ToolArguments(invocation.Activity)), invocation.Activity.Tool))
 				}
 				if len(blocks) > 0 {
 					msgParams = append(msgParams, anthropic.NewAssistantMessage(blocks...))
@@ -177,7 +183,7 @@ func toAnthropicMessages(messages []Message) ([]anthropic.TextBlockParam, []anth
 				if len(step.Activities) > 0 {
 					results := make([]anthropic.ContentBlockParamUnion, 0, len(step.Activities))
 					for _, invocation := range step.Activities {
-						results = append(results, anthropic.NewToolResultBlock(invocation.ID, historicalToolResult(invocation.Activity), invocation.Activity.Status != "success"))
+						results = append(results, anthropic.NewToolResultBlock(invocation.ID, history.ToolResult(invocation.Activity), invocation.Activity.Status != "success"))
 					}
 					msgParams = append(msgParams, anthropic.NewUserMessage(results...))
 				}
@@ -288,41 +294,30 @@ func addAnthropicMessageBlockCacheControl(messages []anthropic.MessageParam, idx
 	return messages
 }
 
-func (c *AnthropicClient) collectTurnWithRetry(
-	ctx context.Context,
-	params anthropic.MessageNewParams,
-	eventCh chan<- StreamEvent,
-	requestOpts ...option.RequestOption,
-) ([]anthropic.ContentBlockParamUnion, []toolUseEntry, *TokenUsage, error) {
-	maxRetries := retryCount(c.maxRetries)
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		assistantBlocks, toolUses, usage, err := c.collectTurn(ctx, params, eventCh, requestOpts...)
-		if err == nil {
-			return assistantBlocks, toolUses, usage, nil
-		}
-		if !isRetryableError(err) || attempt == maxRetries {
-			return nil, nil, nil, err
-		}
-
-		backoff := time.Duration(attempt) * time.Second
-		slog.Debug("LLM stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", backoff, "error", err)
-		eventCh <- StreamEvent{Type: StreamEventTypeRetry, Error: err, Attempt: attempt}
-
-		select {
-		case <-ctx.Done():
-			return nil, nil, nil, ctx.Err()
-		case <-time.After(backoff):
-		}
+func (c *AnthropicClient) collectTurnWithRetry(ctx context.Context, params anthropic.MessageNewParams, eventCh chan<- core.StreamEvent, requestOpts ...option.RequestOption) ([]anthropic.ContentBlockParamUnion, []toolUseEntry, *core.TokenUsage, error) {
+	var blocks []anthropic.ContentBlockParamUnion
+	var uses []toolUseEntry
+	var usage *core.TokenUsage
+	err := retry.Run(ctx, c.maxRetries, func(attempt, maxRetries int, err error) {
+		slog.Debug("LLM stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", time.Duration(attempt)*time.Second, "error", err)
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeRetry, Error: err, Attempt: attempt}
+	}, func() error {
+		var err error
+		blocks, uses, usage, err = c.collectTurn(ctx, params, eventCh, requestOpts...)
+		return err
+	})
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	return nil, nil, nil, nil
+	return blocks, uses, usage, nil
 }
 
 func (c *AnthropicClient) collectTurn(
 	ctx context.Context,
 	params anthropic.MessageNewParams,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 	requestOpts ...option.RequestOption,
-) ([]anthropic.ContentBlockParamUnion, []toolUseEntry, *TokenUsage, error) {
+) ([]anthropic.ContentBlockParamUnion, []toolUseEntry, *core.TokenUsage, error) {
 	stream := c.streamImpl(ctx, params, requestOpts...)
 
 	// Track open content blocks by index so tool continuations can replay the
@@ -330,7 +325,7 @@ func (c *AnthropicClient) collectTurn(
 	blockStates := map[int64]*anthropicContentBlockState{}
 
 	var assistantBlocks []anthropic.ContentBlockParamUnion
-	var usage *TokenUsage
+	var usage *core.TokenUsage
 	var cacheReadInputTokens int64
 
 	for stream.Next() {
@@ -351,7 +346,7 @@ func (c *AnthropicClient) collectTurn(
 			if ms.Message.Usage.InputTokens > 0 {
 				totalInputTokens := int(ms.Message.Usage.InputTokens + ms.Message.Usage.CacheCreationInputTokens + ms.Message.Usage.CacheReadInputTokens)
 				cachedTokens := int(ms.Message.Usage.CacheCreationInputTokens + ms.Message.Usage.CacheReadInputTokens)
-				usage = &TokenUsage{
+				usage = &core.TokenUsage{
 					InputTokens:  totalInputTokens,
 					OutputTokens: int(ms.Message.Usage.OutputTokens),
 					TotalTokens:  totalInputTokens + int(ms.Message.Usage.OutputTokens),
@@ -372,7 +367,7 @@ func (c *AnthropicClient) collectTurn(
 			)
 			cacheReadInputTokens = md.Usage.CacheReadInputTokens
 			if usage == nil && md.Usage.InputTokens > 0 {
-				usage = &TokenUsage{}
+				usage = &core.TokenUsage{}
 			}
 			if usage != nil {
 				totalInputTokens := int(md.Usage.InputTokens + md.Usage.CacheCreationInputTokens + md.Usage.CacheReadInputTokens)
@@ -432,8 +427,8 @@ func (c *AnthropicClient) collectTurn(
 				}
 				state.text += cbd.Delta.Text
 				if cbd.Delta.Text != "" {
-					eventCh <- StreamEvent{
-						Type:    StreamEventTypeChunk,
+					eventCh <- core.StreamEvent{
+						Type:    core.StreamEventTypeChunk,
 						Content: cbd.Delta.Text,
 					}
 				}
@@ -445,8 +440,8 @@ func (c *AnthropicClient) collectTurn(
 				}
 				state.thinking += cbd.Delta.Thinking
 				if cbd.Delta.Thinking != "" {
-					eventCh <- StreamEvent{
-						Type:    StreamEventTypeReasoningChunk,
+					eventCh <- core.StreamEvent{
+						Type:    core.StreamEventTypeReasoningChunk,
 						Content: cbd.Delta.Thinking,
 					}
 				}
@@ -565,14 +560,14 @@ func anthropicThinkingParams(effort string) (anthropic.ThinkingConfigParamUnion,
 	}
 }
 
-func anthropicThinkingParamsForModel(provider Provider, model, effort string) (anthropic.ThinkingConfigParamUnion, anthropic.OutputConfigParam, int64) {
-	if provider == Provider(config.ProviderMiniMax) {
+func anthropicThinkingParamsForModel(provider providerconfig.Provider, model, effort string) (anthropic.ThinkingConfigParamUnion, anthropic.OutputConfigParam, int64) {
+	if provider == providerconfig.Provider(config.ProviderMiniMax) {
 		if model == "MiniMax-M3" {
 			return anthropicThinkingParams(effort)
 		}
 		return anthropic.ThinkingConfigParamUnion{}, anthropic.OutputConfigParam{}, anthropicMaxTokens
 	}
-	if provider == Provider(config.ProviderOpenCodeGo) {
+	if provider == providerconfig.Provider(config.ProviderOpenCodeGo) {
 		if model == "minimax-m3" {
 			return anthropicThinkingParams(effort)
 		}
@@ -586,19 +581,19 @@ func anthropicThinkingParamsForModel(provider Provider, model, effort string) (a
 
 func (c *AnthropicClient) proactivelyCompactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	msgParams *[]anthropic.MessageParam,
 	injectedPending *[]anthropic.MessageParam,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || !hasNewToolTurns || autoCompactOff || len(*injectedPending) > 0 ||
-		!shouldAutoCompact(
-			estimateAnthropicMessagesTokenCount(*msgParams),
-			contextInputBudget(c.contextWindowTokenCount),
+		!core.ShouldAutoCompact(
+			contextreduce.EstimateAnthropic(*msgParams),
+			core.ContextInputBudget(c.contextWindowTokenCount),
 		) {
 		return nil
 	}
@@ -608,48 +603,48 @@ func (c *AnthropicClient) proactivelyCompactHistory(
 
 func (c *AnthropicClient) reduceContextOrCompact(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	msgParams *[]anthropic.MessageParam,
 	injectedPending *[]anthropic.MessageParam,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	forcedRecoveryUsed bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) ([]anthropic.MessageParam, bool, error) {
-	reducedMessages, reduction := reduceAnthropicContextForRequest(c.contextWindowTokenCount, *msgParams)
+	reducedMessages, reduction := contextreduce.ReduceAnthropic(c.contextWindowTokenCount, *msgParams)
 	if reduction.FitsBudget {
 		return reducedMessages, false, nil
 	}
 
 	slog.Debug("Anthropic context still exceeds budget after reduction", "inputTokenCount", reduction.ReducedTokenCount, "removedToolResultCount", reduction.RemovedToolResults)
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || forcedRecoveryUsed || len(*injectedPending) > 0 {
-		return nil, false, fmt.Errorf("%w: %s", ErrContextWindowExceeded, contextWindowExceededError)
+		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
 	if err := c.compactHistory(ctx, compactionHistory, msgParams, injectedPending, turnStartLen, streamOpts.SessionID, eventCh); err != nil {
-		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", ErrContextWindowExceeded, err)
+		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
 }
 
 func (c *AnthropicClient) compactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	msgParams *[]anthropic.MessageParam,
 	injectedPending *[]anthropic.MessageParam,
 	turnStartLen *int,
 	sessionID string,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	compactionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	eventCh <- StreamEvent{Type: StreamEventTypeAutoCompactionStarted, AutoCompaction: &AutoCompactionEvent{Cancel: cancel}}
+	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionStarted, AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel}}
 	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, sessionID)
 	if err != nil {
-		eventType := StreamEventTypeAutoCompactionFailed
-		if isAutoCompactionCancellation(err) {
-			eventType = StreamEventTypeAutoCompactionCancelled
+		eventType := core.StreamEventTypeAutoCompactionFailed
+		if compaction.IsCancellation(err) {
+			eventType = core.StreamEventTypeAutoCompactionCancelled
 		}
-		eventCh <- StreamEvent{Type: eventType, AutoCompaction: &AutoCompactionEvent{Error: err, Usage: usage}}
+		eventCh <- core.StreamEvent{Type: eventType, AutoCompaction: &core.AutoCompactionEvent{Error: err, Usage: usage}}
 		return err
 	}
 
@@ -658,17 +653,17 @@ func (c *AnthropicClient) compactHistory(
 	c.pendingState = nil
 	*injectedPending = nil
 	*turnStartLen = len(*msgParams)
-	eventCh <- StreamEvent{Type: StreamEventTypeAutoCompactionApplied, AutoCompaction: &AutoCompactionEvent{Replacement: replacement, Usage: usage}}
+	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionApplied, AutoCompaction: &core.AutoCompactionEvent{Replacement: replacement, Usage: usage}}
 	return nil
 }
 
 func (c *AnthropicClient) StreamChat(
 	ctx context.Context,
-	messages []Message,
+	messages []core.Message,
 	toolRegistry *tools.Registry,
-	opts ...StreamOptions,
-) (<-chan StreamEvent, error) {
-	eventCh := make(chan StreamEvent)
+	opts ...core.StreamOptions,
+) (<-chan core.StreamEvent, error) {
+	eventCh := make(chan core.StreamEvent)
 	streamOpts := streamOptions(opts)
 
 	go func() {
@@ -683,7 +678,7 @@ func (c *AnthropicClient) StreamChat(
 		turnStartLen := len(msgParams)
 		anthropicTools := toAnthropicTools(toolRegistry)
 		requestOpts := c.requestOptions(streamOpts)
-		compactionHistory := CloneMessages(messages)
+		compactionHistory := core.CloneMessages(messages)
 		autoCompactOff := false
 		hasNewToolTurns := false
 		forcedRecoveryUsed := false
@@ -752,13 +747,13 @@ func (c *AnthropicClient) StreamChat(
 					"total_tokens", usage.TotalTokens,
 					"cached_tokens", usage.CachedTokens,
 				)
-				eventCh <- StreamEvent{Type: StreamEventTypeUsage, Usage: usage}
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeUsage, Usage: usage}
 			} else {
 				slog.Debug("Anthropic usage unavailable for turn")
 			}
 
 			if len(toolUses) == 0 {
-				eventCh <- StreamEvent{Type: StreamEventTypeDone}
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
 
@@ -766,10 +761,10 @@ func (c *AnthropicClient) StreamChat(
 
 			toolResultBlocks, activities := c.executeTools(ctx, toolUses, toolRegistry, eventCh)
 			msgParams = append(msgParams, anthropic.NewUserMessage(toolResultBlocks...))
-			compactionHistory = append(compactionHistory, Message{
-				Role:       RoleAssistant,
+			compactionHistory = append(compactionHistory, core.Message{
+				Role:       core.RoleAssistant,
 				Content:    anthropicAssistantText(assistantBlocks),
-				TurnMemory: &TurnMemory{ToolActivity: activities},
+				TurnMemory: &core.TurnMemory{ToolActivity: activities},
 			})
 			hasNewToolTurns = true
 			autoCompactOff = false
@@ -811,12 +806,12 @@ func apiKeyRefreshMiddleware(resolver *config.APIKeyResolver) option.Middleware 
 	}
 }
 
-func (c *AnthropicClient) requestOptions(opts StreamOptions) []option.RequestOption {
+func (c *AnthropicClient) requestOptions(opts core.StreamOptions) []option.RequestOption {
 	var requestOpts []option.RequestOption
 	for k, v := range c.headers {
 		requestOpts = append(requestOpts, option.WithHeader(k, v))
 	}
-	if c.provider == Provider(config.ProviderOpenCodeGo) && opts.SessionID != "" {
+	if c.provider == providerconfig.Provider(config.ProviderOpenCodeGo) && opts.SessionID != "" {
 		requestOpts = append(requestOpts, option.WithHeader("x-opencode-session", opencodeSessionID(opts.SessionID)))
 	}
 	return requestOpts
@@ -861,17 +856,17 @@ func (c *AnthropicClient) savePendingIfAccumulated(msgParams []anthropic.Message
 	c.pendingState = append(c.pendingState, newDelta...)
 }
 
-func (c *AnthropicClient) emitTerminalEvent(eventCh chan<- StreamEvent, msgParams []anthropic.MessageParam, turnStartLen int, injectedPending []anthropic.MessageParam, err error) {
+func (c *AnthropicClient) emitTerminalEvent(eventCh chan<- core.StreamEvent, msgParams []anthropic.MessageParam, turnStartLen int, injectedPending []anthropic.MessageParam, err error) {
 	if len(injectedPending) > 0 || len(msgParams) > turnStartLen {
-		eventCh <- StreamEvent{Type: StreamEventTypeIncomplete, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeIncomplete, Error: err}
 	} else if err != nil {
-		eventCh <- StreamEvent{Type: StreamEventTypeError, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: err}
 	} else {
-		eventCh <- StreamEvent{Type: StreamEventTypeDone}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 	}
 }
 
-func (c *AnthropicClient) exitIncomplete(eventCh chan<- StreamEvent, msgParams []anthropic.MessageParam, turnStartLen int, injectedPending []anthropic.MessageParam, err error, oneShot bool) {
+func (c *AnthropicClient) exitIncomplete(eventCh chan<- core.StreamEvent, msgParams []anthropic.MessageParam, turnStartLen int, injectedPending []anthropic.MessageParam, err error, oneShot bool) {
 	if !oneShot {
 		c.savePendingIfAccumulated(msgParams, turnStartLen, injectedPending)
 	}
@@ -892,48 +887,20 @@ func (c *AnthropicClient) executeTools(
 	ctx context.Context,
 	toolUses []toolUseEntry,
 	registry *tools.Registry,
-	eventCh chan<- StreamEvent,
-) ([]anthropic.ContentBlockParamUnion, []HistoricalToolActivity) {
+	eventCh chan<- core.StreamEvent,
+) ([]anthropic.ContentBlockParamUnion, []core.HistoricalToolActivity) {
 	resultBlocks := make([]anthropic.ContentBlockParamUnion, 0, len(toolUses))
-	activities := make([]HistoricalToolActivity, 0, len(toolUses))
+	activities := make([]core.HistoricalToolActivity, 0, len(toolUses))
 
 	for _, tu := range toolUses {
-		start := time.Now()
-
 		slog.Debug("Tool request", "tool", tu.name, "input", tu.input)
-
-		rawOutput, output, execErr, toolStarted := executeValidatedTool(ctx, registry, tu.name, tu.input, eventCh)
-
-		duration := time.Since(start)
-		toolCall := &ToolCall{
-			Name:     tu.name,
-			Input:    tu.input,
-			Output:   rawOutput,
-			Duration: duration,
+		execution := executeTool(ctx, registry, tu.name, tu.input, eventCh)
+		resultContent := history.SerializeJSON(execution.LLMOutput)
+		if execution.Err != nil {
+			resultContent = history.SerializeJSON(map[string]any{"error": execution.Err.Error()})
 		}
-
-		var resultContent string
-		if execErr != nil {
-			toolCall.Error = execErr.Error()
-			slog.Debug("Tool response", "tool", tu.name, "error", execErr.Error(), "duration", duration)
-			if toolStarted {
-				eventCh <- StreamEvent{
-					Type:     StreamEventTypeToolEnd,
-					ToolCall: toolCall,
-				}
-			}
-			resultContent = serializeJSON(map[string]any{"error": execErr.Error()})
-		} else {
-			slog.Debug("Tool response", "tool", tu.name, "duration", duration)
-			eventCh <- StreamEvent{
-				Type:     StreamEventTypeToolEnd,
-				ToolCall: toolCall,
-			}
-			resultContent = serializeJSON(output)
-		}
-
-		resultBlocks = append(resultBlocks, anthropic.NewToolResultBlock(tu.id, resultContent, execErr != nil))
-		activities = append(activities, historicalToolActivity(tu.name, tu.input, rawOutput, output, execErr))
+		resultBlocks = append(resultBlocks, anthropic.NewToolResultBlock(tu.id, resultContent, execution.Err != nil))
+		activities = append(activities, execution.Activity)
 	}
 
 	return resultBlocks, activities

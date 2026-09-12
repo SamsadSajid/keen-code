@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
 	"github.com/mochow13/keen-code/internal/providers"
 )
-
-type Provider string
 
 const (
 	deepSeekBaseURL   = "https://api.deepseek.com/"
@@ -17,18 +17,6 @@ const (
 	miniMaxBaseURL    = "https://api.minimax.io/anthropic"
 	openCodeGoBaseURL = "https://opencode.ai/zen/go"
 )
-
-type ClientConfig struct {
-	Provider            Provider
-	APIKey              string
-	APIKeyHelper        string
-	Model               string
-	ThinkingEffort      string
-	BaseURL             string
-	MaxRetries          int
-	ContextWindowTokens int
-	Headers             map[string]string
-}
 
 func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 	if config.RequiresAPIKey(cfg.Provider) && cfg.APIKey == "" {
@@ -45,12 +33,12 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 	resolved.ThinkingEffort = thinkingEffort
 	cfg = &resolved
 
-	contextWindowTokenCount := contextWindowForProviderModel(Provider(cfg.Provider), cfg.Model)
+	contextWindowTokenCount := contextWindowForProviderModel(providerconfig.Provider(cfg.Provider), cfg.Model)
 
 	switch cfg.Provider {
 	case config.ProviderAnthropic:
-		return NewAnthropicClient(&ClientConfig{
-			Provider:            Provider(cfg.Provider),
+		return NewAnthropicClient(&providerconfig.ClientConfig{
+			Provider:            providerconfig.Provider(cfg.Provider),
 			APIKey:              cfg.APIKey,
 			APIKeyHelper:        cfg.APIKeyHelper,
 			Model:               cfg.Model,
@@ -60,8 +48,8 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 			Headers:             cfg.Headers,
 		})
 	case config.ProviderMiniMax:
-		return NewAnthropicClient(&ClientConfig{
-			Provider:            Provider(cfg.Provider),
+		return NewAnthropicClient(&providerconfig.ClientConfig{
+			Provider:            providerconfig.Provider(cfg.Provider),
 			APIKey:              cfg.APIKey,
 			Model:               cfg.Model,
 			ThinkingEffort:      cfg.ThinkingEffort,
@@ -70,8 +58,8 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 			Headers:             cfg.Headers,
 		})
 	case config.ProviderGoogleAI:
-		return NewGenkitClient(&ClientConfig{
-			Provider:            Provider(cfg.Provider),
+		return NewGenkitClient(&providerconfig.ClientConfig{
+			Provider:            providerconfig.Provider(cfg.Provider),
 			APIKey:              cfg.APIKey,
 			Model:               cfg.Model,
 			ThinkingEffort:      cfg.ThinkingEffort,
@@ -80,8 +68,8 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 			Headers:             cfg.Headers,
 		})
 	case config.ProviderOpenAI:
-		return NewOpenAIResponsesClient(&ClientConfig{
-			Provider:            Provider(cfg.Provider),
+		return NewOpenAIResponsesClient(&providerconfig.ClientConfig{
+			Provider:            providerconfig.Provider(cfg.Provider),
 			APIKey:              cfg.APIKey,
 			Model:               cfg.Model,
 			ThinkingEffort:      cfg.ThinkingEffort,
@@ -90,16 +78,16 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 			Headers:             cfg.Headers,
 		})
 	case config.ProviderOpenAICodex:
-		return NewOpenAICodexClient(&ClientConfig{
-			Provider:            Provider(cfg.Provider),
+		return NewOpenAICodexClient(&providerconfig.ClientConfig{
+			Provider:            providerconfig.Provider(cfg.Provider),
 			Model:               cfg.Model,
 			ThinkingEffort:      cfg.ThinkingEffort,
 			ContextWindowTokens: contextWindowTokenCount,
 			Headers:             cfg.Headers,
 		})
 	case config.ProviderBedrock:
-		return NewBedrockClient(&ClientConfig{
-			Provider:            Provider(cfg.Provider),
+		return NewBedrockClient(&providerconfig.ClientConfig{
+			Provider:            providerconfig.Provider(cfg.Provider),
 			APIKey:              cfg.APIKey,
 			Model:               cfg.Model,
 			BaseURL:             cfg.BaseURL,
@@ -111,8 +99,8 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 		config.ProviderMoonshotAI,
 		config.ProviderZAI,
 		config.ProviderOpenAICompatible:
-		return NewOpenAICompatibleClient(&ClientConfig{
-			Provider:            Provider(cfg.Provider),
+		return NewOpenAICompatibleClient(&providerconfig.ClientConfig{
+			Provider:            providerconfig.Provider(cfg.Provider),
 			APIKey:              cfg.APIKey,
 			Model:               cfg.Model,
 			ThinkingEffort:      cfg.ThinkingEffort,
@@ -126,8 +114,8 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 			if baseURL == "" {
 				baseURL = openCodeGoBaseURL + "/v1/"
 			}
-			return NewOpenAIResponsesClient(&ClientConfig{
-				Provider:            Provider(cfg.Provider),
+			return NewOpenAIResponsesClient(&providerconfig.ClientConfig{
+				Provider:            providerconfig.Provider(cfg.Provider),
 				APIKey:              cfg.APIKey,
 				Model:               cfg.Model,
 				ThinkingEffort:      cfg.ThinkingEffort,
@@ -137,8 +125,8 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 			})
 		}
 		if isOpenCodeGoAnthropicModel(cfg.Model) {
-			return NewAnthropicClient(&ClientConfig{
-				Provider:            Provider(cfg.Provider),
+			return NewAnthropicClient(&providerconfig.ClientConfig{
+				Provider:            providerconfig.Provider(cfg.Provider),
 				APIKey:              cfg.APIKey,
 				Model:               cfg.Model,
 				BaseURL:             cfg.BaseURL,
@@ -147,8 +135,8 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 				Headers:             cfg.Headers,
 			})
 		}
-		return NewOpenAICompatibleClient(&ClientConfig{
-			Provider:            Provider(cfg.Provider),
+		return NewOpenAICompatibleClient(&providerconfig.ClientConfig{
+			Provider:            providerconfig.Provider(cfg.Provider),
 			APIKey:              cfg.APIKey,
 			Model:               cfg.Model,
 			ThinkingEffort:      cfg.ThinkingEffort,
@@ -161,14 +149,14 @@ func NewClient(cfg *config.ResolvedConfig) (LLMClient, error) {
 	}
 }
 
-func contextWindowForProviderModel(provider Provider, model string) int {
+func contextWindowForProviderModel(provider providerconfig.Provider, model string) int {
 	registry, err := providers.Load()
 	if err != nil {
-		return defaultContextWindowTokenCount
+		return core.DefaultContextWindowTokenCount
 	}
 	contextWindowTokenCount, ok := registry.GetModelContextWindow(string(provider), model)
 	if !ok {
-		return defaultContextWindowTokenCount
+		return core.DefaultContextWindowTokenCount
 	}
 	return contextWindowTokenCount
 }

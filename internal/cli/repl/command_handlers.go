@@ -3,6 +3,7 @@ package repl
 import (
 	"context"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"slices"
 	"strconv"
 	"strings"
@@ -240,7 +241,7 @@ func (m *replModel) startCompaction(extraPrompt string) (replModel, tea.Cmd) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	eventCh, err := m.appState.StreamCompact(ctx, m.ctx.cfg, extraPrompt, llm.StreamOptions{SessionID: m.sessions.currentID()})
+	eventCh, err := m.appState.StreamCompact(ctx, m.ctx.cfg, extraPrompt, core.StreamOptions{SessionID: m.sessions.currentID()})
 	if err != nil {
 		cancel()
 		m.output.AddError(err.Error(), repltheme.ErrorStyle)

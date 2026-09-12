@@ -4,23 +4,18 @@ import (
 	"context"
 	"strings"
 
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
 type LLMClient interface {
-	StreamChat(ctx context.Context, messages []Message, toolRegistry *tools.Registry, opts ...StreamOptions) (<-chan StreamEvent, error)
+	StreamChat(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, opts ...core.StreamOptions) (<-chan core.StreamEvent, error)
 	Reset()
 }
 
-type StreamOptions struct {
-	SessionID             string
-	OneShot               bool
-	DisableAutoCompaction bool
-}
-
-func streamOptions(opts []StreamOptions) StreamOptions {
+func streamOptions(opts []core.StreamOptions) core.StreamOptions {
 	if len(opts) == 0 {
-		return StreamOptions{}
+		return core.StreamOptions{}
 	}
 	return opts[0]
 }

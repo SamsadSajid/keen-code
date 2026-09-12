@@ -10,12 +10,13 @@ import (
 
 	"github.com/mochow13/keen-code/internal/config"
 	"github.com/mochow13/keen-code/internal/llm"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/skills"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
 type mockLLMClient struct {
-	streamChatFunc func(ctx context.Context, messages []llm.Message, toolRegistry *tools.Registry) (<-chan llm.StreamEvent, error)
+	streamChatFunc func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error)
 	resetCount     int
 }
 
@@ -31,11 +32,11 @@ func (d dummyTool) InputSchema() map[string]any { return nil }
 
 func (d dummyTool) Execute(ctx context.Context, input any) (any, error) { return nil, nil }
 
-func (m *mockLLMClient) StreamChat(ctx context.Context, messages []llm.Message, toolRegistry *tools.Registry, opts ...llm.StreamOptions) (<-chan llm.StreamEvent, error) {
+func (m *mockLLMClient) StreamChat(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
 	if m.streamChatFunc != nil {
 		return m.streamChatFunc(ctx, messages, toolRegistry)
 	}
-	ch := make(chan llm.StreamEvent)
+	ch := make(chan core.StreamEvent)
 	close(ch)
 	return ch, nil
 }
@@ -62,23 +63,23 @@ func TestNewAppState(t *testing.T) {
 func TestAppState_AddMessage(t *testing.T) {
 	state := New(nil, t.TempDir())
 
-	state.AddMessage(llm.RoleUser, "Hello")
+	state.AddMessage(core.RoleUser, "Hello")
 	if len(state.messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(state.messages))
 	}
-	if state.messages[0].Role != llm.RoleUser {
-		t.Errorf("expected role %s, got %s", llm.RoleUser, state.messages[0].Role)
+	if state.messages[0].Role != core.RoleUser {
+		t.Errorf("expected role %s, got %s", core.RoleUser, state.messages[0].Role)
 	}
 	if state.messages[0].Content != "Hello" {
 		t.Errorf("expected content %q, got %q", "Hello", state.messages[0].Content)
 	}
 
-	state.AddMessage(llm.RoleAssistant, "Hi there")
+	state.AddMessage(core.RoleAssistant, "Hi there")
 	if len(state.messages) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(state.messages))
 	}
-	if state.messages[1].Role != llm.RoleAssistant {
-		t.Errorf("expected role %s, got %s", llm.RoleAssistant, state.messages[1].Role)
+	if state.messages[1].Role != core.RoleAssistant {
+		t.Errorf("expected role %s, got %s", core.RoleAssistant, state.messages[1].Role)
 	}
 }
 
@@ -90,7 +91,7 @@ func TestAppState_GetMessages(t *testing.T) {
 		t.Errorf("expected 0 messages, got %d", len(messages))
 	}
 
-	state.AddMessage(llm.RoleUser, "Test")
+	state.AddMessage(core.RoleUser, "Test")
 	messages = state.GetMessages()
 	if len(messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(messages))
@@ -102,11 +103,11 @@ func TestAppState_GetMessages(t *testing.T) {
 
 func TestAppState_GetMessages_ReturnsCopy(t *testing.T) {
 	state := New(nil, t.TempDir())
-	state.AppendMessage(llm.Message{
-		Role:    llm.RoleAssistant,
+	state.AppendMessage(core.Message{
+		Role:    core.RoleAssistant,
 		Content: "Original",
-		TurnMemory: &llm.TurnMemory{
-			ToolActivity: []llm.HistoricalToolActivity{{Tool: "write_file", Input: map[string]any{"path": "a.go", "content": "content"}, Status: "success"}},
+		TurnMemory: &core.TurnMemory{
+			ToolActivity: []core.HistoricalToolActivity{{Tool: "write_file", Input: map[string]any{"path": "a.go", "content": "content"}, Status: "success"}},
 		},
 	})
 
@@ -126,8 +127,8 @@ func TestAppState_GetMessages_ReturnsCopy(t *testing.T) {
 func TestAppState_ClearMessages(t *testing.T) {
 	state := New(nil, t.TempDir())
 
-	state.AddMessage(llm.RoleUser, "Hello")
-	state.AddMessage(llm.RoleAssistant, "Hi")
+	state.AddMessage(core.RoleUser, "Hello")
+	state.AddMessage(core.RoleAssistant, "Hi")
 	if len(state.messages) != 2 {
 		t.Fatalf("expected 2 messages before clear, got %d", len(state.messages))
 	}
@@ -233,16 +234,16 @@ func TestAppState_ResetClientState_NilClient(t *testing.T) {
 }
 
 func TestAppState_StreamChat_WithClient(t *testing.T) {
-	expectedEvents := []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "Hello"},
-		{Type: llm.StreamEventTypeDone},
+	expectedEvents := []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "Hello"},
+		{Type: core.StreamEventTypeDone},
 	}
-	var capturedMessages []llm.Message
+	var capturedMessages []core.Message
 
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []llm.Message, toolRegistry *tools.Registry) (<-chan llm.StreamEvent, error) {
-			capturedMessages = append([]llm.Message(nil), messages...)
-			ch := make(chan llm.StreamEvent)
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+			capturedMessages = append([]core.Message(nil), messages...)
+			ch := make(chan core.StreamEvent)
 			go func() {
 				defer close(ch)
 				for _, e := range expectedEvents {
@@ -265,7 +266,7 @@ func TestAppState_StreamChat_WithClient(t *testing.T) {
 	}
 
 	state := New(client, work)
-	state.AddMessage(llm.RoleUser, "Hi")
+	state.AddMessage(core.RoleUser, "Hi")
 
 	cfg := &config.ResolvedConfig{APIKey: "key", Model: "model"}
 	eventCh, err := state.StreamChat(context.Background(), cfg)
@@ -273,7 +274,7 @@ func TestAppState_StreamChat_WithClient(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var received []llm.StreamEvent
+	var received []core.StreamEvent
 	for e := range eventCh {
 		received = append(received, e)
 	}
@@ -281,7 +282,7 @@ func TestAppState_StreamChat_WithClient(t *testing.T) {
 	if len(received) != len(expectedEvents) {
 		t.Errorf("expected %d events, got %d", len(expectedEvents), len(received))
 	}
-	if len(capturedMessages) == 0 || capturedMessages[0].Role != llm.RoleSystem {
+	if len(capturedMessages) == 0 || capturedMessages[0].Role != core.RoleSystem {
 		t.Fatalf("expected system message, got %#v", capturedMessages)
 	}
 	if !strings.Contains(capturedMessages[0].Content, "- demo: Demo skill") {
@@ -291,7 +292,7 @@ func TestAppState_StreamChat_WithClient(t *testing.T) {
 
 func TestAppState_StreamChat_NilClient(t *testing.T) {
 	state := New(nil, t.TempDir())
-	state.AddMessage(llm.RoleUser, "Hi")
+	state.AddMessage(core.RoleUser, "Hi")
 
 	cfg := &config.ResolvedConfig{APIKey: "key", Model: "model"}
 	eventCh, err := state.StreamChat(context.Background(), cfg)
@@ -304,13 +305,13 @@ func TestAppState_StreamChat_NilClient(t *testing.T) {
 }
 
 func TestAppState_StreamChatPlanModeUsesPlanPromptAndRemovesWriteTools(t *testing.T) {
-	var capturedMessages []llm.Message
+	var capturedMessages []core.Message
 	var capturedRegistry *tools.Registry
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []llm.Message, toolRegistry *tools.Registry) (<-chan llm.StreamEvent, error) {
-			capturedMessages = append([]llm.Message(nil), messages...)
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+			capturedMessages = append([]core.Message(nil), messages...)
 			capturedRegistry = toolRegistry
-			ch := make(chan llm.StreamEvent)
+			ch := make(chan core.StreamEvent)
 			close(ch)
 			return ch, nil
 		},
@@ -361,7 +362,7 @@ func TestAppState_StreamChatPlanModeUsesPlanPromptAndRemovesWriteTools(t *testin
 func TestAppState_StreamChat_ClientError(t *testing.T) {
 	expectedErr := errors.New("stream error")
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []llm.Message, toolRegistry *tools.Registry) (<-chan llm.StreamEvent, error) {
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
 			return nil, expectedErr
 		},
 	}
@@ -455,30 +456,30 @@ func TestAppState_UpdateClient_ToNil(t *testing.T) {
 }
 
 func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
-	var capturedMessages []llm.Message
+	var capturedMessages []core.Message
 	var capturedRegistry *tools.Registry
 
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []llm.Message, toolRegistry *tools.Registry) (<-chan llm.StreamEvent, error) {
-			capturedMessages = append([]llm.Message(nil), messages...)
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+			capturedMessages = append([]core.Message(nil), messages...)
 			capturedRegistry = toolRegistry
 
-			ch := make(chan llm.StreamEvent, 2)
-			ch <- llm.StreamEvent{Type: llm.StreamEventTypeChunk, Content: "compacted summary"}
-			ch <- llm.StreamEvent{Type: llm.StreamEventTypeDone}
+			ch := make(chan core.StreamEvent, 2)
+			ch <- core.StreamEvent{Type: core.StreamEventTypeChunk, Content: "compacted summary"}
+			ch <- core.StreamEvent{Type: core.StreamEventTypeDone}
 			close(ch)
 			return ch, nil
 		},
 	}
 
 	state := New(client, t.TempDir())
-	original := make([]llm.Message, 0, 25)
+	original := make([]core.Message, 0, 25)
 	for i := 0; i < 25; i++ {
-		role := llm.RoleUser
+		role := core.RoleUser
 		if i%2 == 1 {
-			role = llm.RoleAssistant
+			role = core.RoleAssistant
 		}
-		msg := llm.Message{Role: role, Content: "message " + strings.Repeat("x", i+1)}
+		msg := core.Message{Role: role, Content: "message " + strings.Repeat("x", i+1)}
 		original = append(original, msg)
 		state.AddMessage(role, msg.Content)
 	}
@@ -500,7 +501,7 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 	if len(capturedMessages) != len(original)+2 {
 		t.Fatalf("expected %d compaction request messages, got %d", len(original)+2, len(capturedMessages))
 	}
-	if capturedMessages[0].Role != llm.RoleSystem {
+	if capturedMessages[0].Role != core.RoleSystem {
 		t.Fatalf("expected first compaction message to be system, got %s", capturedMessages[0].Role)
 	}
 	if !strings.Contains(capturedMessages[0].Content, "Keep business logic details") {
@@ -513,7 +514,7 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 		}
 	}
 	last := capturedMessages[len(capturedMessages)-1]
-	if last.Role != llm.RoleUser {
+	if last.Role != core.RoleUser {
 		t.Fatalf("expected final compaction message to be user, got %s", last.Role)
 	}
 	if last.Content != compactionUserInstruction {
@@ -523,8 +524,8 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 
 func TestAppState_ApplyCompactionReplacesHistoryWithSingleSummaryMessage(t *testing.T) {
 	state := New(&mockLLMClient{}, t.TempDir())
-	state.AddMessage(llm.RoleUser, "hello")
-	state.AddMessage(llm.RoleAssistant, "world")
+	state.AddMessage(core.RoleUser, "hello")
+	state.AddMessage(core.RoleAssistant, "world")
 
 	if err := state.ApplyCompaction("  compacted summary  "); err != nil {
 		t.Fatalf("ApplyCompaction() returned error: %v", err)
@@ -534,31 +535,31 @@ func TestAppState_ApplyCompactionReplacesHistoryWithSingleSummaryMessage(t *test
 	if len(compacted) != 1 {
 		t.Fatalf("expected compacted history to contain one summary message, got %d", len(compacted))
 	}
-	if compacted[0].Role != llm.RoleUser || compacted[0].Content != "compacted summary" {
+	if compacted[0].Role != core.RoleUser || compacted[0].Content != "compacted summary" {
 		t.Fatalf("unexpected summary message: %#v", compacted[0])
 	}
 }
 
 func TestAppState_StreamBtwBuildsCorrectMessages(t *testing.T) {
-	var capturedMessages []llm.Message
+	var capturedMessages []core.Message
 	var capturedRegistry *tools.Registry
 
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []llm.Message, toolRegistry *tools.Registry) (<-chan llm.StreamEvent, error) {
-			capturedMessages = append([]llm.Message(nil), messages...)
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+			capturedMessages = append([]core.Message(nil), messages...)
 			capturedRegistry = toolRegistry
 
-			ch := make(chan llm.StreamEvent, 2)
-			ch <- llm.StreamEvent{Type: llm.StreamEventTypeChunk, Content: "answer"}
-			ch <- llm.StreamEvent{Type: llm.StreamEventTypeDone}
+			ch := make(chan core.StreamEvent, 2)
+			ch <- core.StreamEvent{Type: core.StreamEventTypeChunk, Content: "answer"}
+			ch <- core.StreamEvent{Type: core.StreamEventTypeDone}
 			close(ch)
 			return ch, nil
 		},
 	}
 
 	state := New(client, t.TempDir())
-	state.AddMessage(llm.RoleUser, "fix the bug")
-	state.AddMessage(llm.RoleAssistant, "done")
+	state.AddMessage(core.RoleUser, "fix the bug")
+	state.AddMessage(core.RoleAssistant, "done")
 
 	eventCh, err := state.StreamBtw(context.Background(), "what is the bug about?")
 	if err != nil {
@@ -578,35 +579,35 @@ func TestAppState_StreamBtwBuildsCorrectMessages(t *testing.T) {
 	if len(capturedMessages) != 4 {
 		t.Fatalf("expected 4 messages (system + 2 history + question), got %d", len(capturedMessages))
 	}
-	if capturedMessages[0].Role != llm.RoleSystem {
+	if capturedMessages[0].Role != core.RoleSystem {
 		t.Fatalf("expected first message to be system, got %s", capturedMessages[0].Role)
 	}
 	if !strings.Contains(capturedMessages[0].Content, "btw") {
 		t.Fatalf("expected btw system prompt, got %q", capturedMessages[0].Content)
 	}
-	if capturedMessages[1].Role != llm.RoleUser || capturedMessages[1].Content != "fix the bug" {
+	if capturedMessages[1].Role != core.RoleUser || capturedMessages[1].Content != "fix the bug" {
 		t.Fatalf("expected first history message to be user, got %#v", capturedMessages[1])
 	}
-	if capturedMessages[2].Role != llm.RoleAssistant || capturedMessages[2].Content != "done" {
+	if capturedMessages[2].Role != core.RoleAssistant || capturedMessages[2].Content != "done" {
 		t.Fatalf("expected second history message to be assistant, got %#v", capturedMessages[2])
 	}
 	last := capturedMessages[len(capturedMessages)-1]
-	if last.Role != llm.RoleUser || last.Content != "what is the bug about?" {
+	if last.Role != core.RoleUser || last.Content != "what is the bug about?" {
 		t.Fatalf("expected user question as last message, got %#v", last)
 	}
 }
 
 func TestBtwContext(t *testing.T) {
-	makeMsg := func(role llm.Role, content string) llm.Message {
-		return llm.Message{Role: role, Content: content}
+	makeMsg := func(role core.Role, content string) core.Message {
+		return core.Message{Role: role, Content: content}
 	}
 
 	tests := []struct {
 		name     string
-		messages []llm.Message
+		messages []core.Message
 		max      int
 		wantLen  int
-		wantLast llm.Role
+		wantLast core.Role
 	}{
 		{
 			name:     "empty history",
@@ -616,47 +617,47 @@ func TestBtwContext(t *testing.T) {
 		},
 		{
 			name:     "only unanswered user message",
-			messages: []llm.Message{makeMsg(llm.RoleUser, "hi")},
+			messages: []core.Message{makeMsg(core.RoleUser, "hi")},
 			max:      10,
 			wantLen:  0,
 		},
 		{
 			name: "trailing unanswered user message excluded",
-			messages: []llm.Message{
-				makeMsg(llm.RoleUser, "q1"),
-				makeMsg(llm.RoleAssistant, "a1"),
-				makeMsg(llm.RoleUser, "unanswered"),
+			messages: []core.Message{
+				makeMsg(core.RoleUser, "q1"),
+				makeMsg(core.RoleAssistant, "a1"),
+				makeMsg(core.RoleUser, "unanswered"),
 			},
 			max:      10,
 			wantLen:  2,
-			wantLast: llm.RoleAssistant,
+			wantLast: core.RoleAssistant,
 		},
 		{
 			name: "capped at max",
-			messages: func() []llm.Message {
-				msgs := make([]llm.Message, 14)
+			messages: func() []core.Message {
+				msgs := make([]core.Message, 14)
 				for i := range msgs {
 					if i%2 == 0 {
-						msgs[i] = makeMsg(llm.RoleUser, "u")
+						msgs[i] = makeMsg(core.RoleUser, "u")
 					} else {
-						msgs[i] = makeMsg(llm.RoleAssistant, "a")
+						msgs[i] = makeMsg(core.RoleAssistant, "a")
 					}
 				}
 				return msgs
 			}(),
 			max:      10,
 			wantLen:  10,
-			wantLast: llm.RoleAssistant,
+			wantLast: core.RoleAssistant,
 		},
 		{
 			name: "fewer messages than max returned as-is",
-			messages: []llm.Message{
-				makeMsg(llm.RoleUser, "q"),
-				makeMsg(llm.RoleAssistant, "a"),
+			messages: []core.Message{
+				makeMsg(core.RoleUser, "q"),
+				makeMsg(core.RoleAssistant, "a"),
 			},
 			max:      10,
 			wantLen:  2,
-			wantLast: llm.RoleAssistant,
+			wantLast: core.RoleAssistant,
 		},
 	}
 
@@ -675,7 +676,7 @@ func TestBtwContext(t *testing.T) {
 
 func TestAppState_StreamBtwNilClient(t *testing.T) {
 	state := New(nil, t.TempDir())
-	state.AddMessage(llm.RoleUser, "hello")
+	state.AddMessage(core.RoleUser, "hello")
 
 	eventCh, err := state.StreamBtw(context.Background(), "question")
 	if err != nil {
@@ -689,7 +690,7 @@ func TestAppState_StreamBtwNilClient(t *testing.T) {
 func TestAppState_StreamBtwDoesNotModifyMessages(t *testing.T) {
 	client := &mockLLMClient{}
 	state := New(client, t.TempDir())
-	state.AddMessage(llm.RoleUser, "original")
+	state.AddMessage(core.RoleUser, "original")
 
 	_, _ = state.StreamBtw(context.Background(), "side question")
 
@@ -701,8 +702,8 @@ func TestAppState_StreamBtwDoesNotModifyMessages(t *testing.T) {
 
 func TestAppState_ApplyCompactionLeavesMessagesUntouchedOnError(t *testing.T) {
 	state := New(&mockLLMClient{}, t.TempDir())
-	state.AddMessage(llm.RoleUser, "hello")
-	state.AddMessage(llm.RoleAssistant, "world")
+	state.AddMessage(core.RoleUser, "hello")
+	state.AddMessage(core.RoleAssistant, "world")
 	original := state.GetMessages()
 
 	err := state.ApplyCompaction(" \n\t ")
@@ -717,7 +718,7 @@ func TestAppState_ApplyCompactionLeavesMessagesUntouchedOnError(t *testing.T) {
 
 func TestAppState_StreamCompactLeavesMessagesUntouchedOnCancel(t *testing.T) {
 	state := New(&mockLLMClient{}, t.TempDir())
-	state.AddMessage(llm.RoleUser, "hello")
+	state.AddMessage(core.RoleUser, "hello")
 	original := state.GetMessages()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -740,14 +741,14 @@ func TestAppState_StreamCompactLeavesMessagesUntouchedOnCancel(t *testing.T) {
 
 func TestAppState_MessageReplacementFiltersSystemMessagesAndClones(t *testing.T) {
 	state := &AppState{}
-	messages := []llm.Message{
-		{Role: llm.RoleSystem, Content: "system"},
-		{Role: llm.RoleUser, Content: "user", TurnMemory: &llm.TurnMemory{ToolActivity: []llm.HistoricalToolActivity{{Tool: "read_file"}}}},
-		{Role: llm.RoleAssistant, Content: "assistant"},
+	messages := []core.Message{
+		{Role: core.RoleSystem, Content: "system"},
+		{Role: core.RoleUser, Content: "user", TurnMemory: &core.TurnMemory{ToolActivity: []core.HistoricalToolActivity{{Tool: "read_file"}}}},
+		{Role: core.RoleAssistant, Content: "assistant"},
 	}
 
 	filtered := WithoutSystemMessages(messages)
-	if len(filtered) != 2 || filtered[0].Role != llm.RoleUser || filtered[1].Role != llm.RoleAssistant {
+	if len(filtered) != 2 || filtered[0].Role != core.RoleUser || filtered[1].Role != core.RoleAssistant {
 		t.Fatalf("WithoutSystemMessages() = %#v", filtered)
 	}
 	filtered[0].Content = "changed"
@@ -786,7 +787,7 @@ func TestAppState_ClientModeAndUsageAccessors(t *testing.T) {
 		t.Fatalf("invalid mode = %q, want build", state.Mode())
 	}
 
-	usage := &llm.TokenUsage{InputTokens: 42}
+	usage := &core.TokenUsage{InputTokens: 42}
 	state.SetLastUsage(usage)
 	usage.InputTokens = 99
 	if got := state.GetLastUsage(); got == nil || got.InputTokens != 42 {

@@ -1,9 +1,9 @@
 package repl
 
 import (
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"time"
 
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/session"
 	"github.com/mochow13/keen-code/internal/tools"
 )
@@ -51,7 +51,7 @@ func (s *replSessionState) appendUserMessage(content string) error {
 
 func (s *replSessionState) appendAssistantTurn(
 	segments []streamSegment,
-	message llm.Message,
+	message core.Message,
 	interrupted bool,
 	errText string,
 ) error {
@@ -61,14 +61,14 @@ func (s *replSessionState) appendAssistantTurn(
 	return s.store.Append(s.current, buildAssistantTurnEvent(segments, message, interrupted, errText))
 }
 
-func (s *replSessionState) appendCompaction(segments []streamSegment, messages []llm.Message, status string) error {
+func (s *replSessionState) appendCompaction(segments []streamSegment, messages []core.Message, status string) error {
 	if s == nil || s.current == nil {
 		return nil
 	}
 	return s.store.Append(s.current, buildCompactionEvent(segments, messages, status))
 }
 
-func (s *replSessionState) appendAutoCompaction(checkpointSegments []streamSegment, checkpoint llm.Message, messages []llm.Message) error {
+func (s *replSessionState) appendAutoCompaction(checkpointSegments []streamSegment, checkpoint core.Message, messages []core.Message) error {
 	if s == nil || s.current == nil {
 		return nil
 	}
@@ -78,7 +78,7 @@ func (s *replSessionState) appendAutoCompaction(checkpointSegments []streamSegme
 	})
 }
 
-func buildCompactionEvent(segments []streamSegment, messages []llm.Message, status string) session.Event {
+func buildCompactionEvent(segments []streamSegment, messages []core.Message, status string) session.Event {
 	return session.Event{
 		Kind: session.KindCompactionApplied,
 		CompactionApplied: &session.CompactionAppliedPayload{
@@ -133,7 +133,7 @@ func (s *replSessionState) setSession(session *session.Session) {
 
 func buildAssistantTurnEvent(
 	segments []streamSegment,
-	message llm.Message,
+	message core.Message,
 	interrupted bool,
 	errText string,
 ) session.Event {
@@ -142,7 +142,7 @@ func buildAssistantTurnEvent(
 		AssistantTurn: &session.AssistantTurnPayload{
 			Transcript:  buildAssistantTurnTranscript(segments),
 			Message:     message.Content,
-			TurnMemory:  llm.CloneTurnMemory(message.TurnMemory),
+			TurnMemory:  core.CloneTurnMemory(message.TurnMemory),
 			Interrupted: interrupted,
 			Error:       errText,
 		},
@@ -235,8 +235,8 @@ func cloneInput(input map[string]any) map[string]any {
 	return result
 }
 
-func cloneLLMMessages(messages []llm.Message) []llm.Message {
-	return llm.CloneMessages(messages)
+func cloneLLMMessages(messages []core.Message) []core.Message {
+	return core.CloneMessages(messages)
 }
 
 func cloneStreamSegments(segments []streamSegment) []streamSegment {
@@ -260,21 +260,21 @@ func cloneStreamSegments(segments []streamSegment) []streamSegment {
 	return result
 }
 
-func toolCallFromPayload(payload *session.ToolStartPayload) *llm.ToolCall {
+func toolCallFromPayload(payload *session.ToolStartPayload) *core.ToolCall {
 	if payload == nil {
 		return nil
 	}
-	return &llm.ToolCall{
+	return &core.ToolCall{
 		Name:  payload.Name,
 		Input: cloneInput(payload.Input),
 	}
 }
 
-func toolCallResultFromPayload(payload *session.ToolEndPayload) *llm.ToolCall {
+func toolCallResultFromPayload(payload *session.ToolEndPayload) *core.ToolCall {
 	if payload == nil {
 		return nil
 	}
-	return &llm.ToolCall{
+	return &core.ToolCall{
 		Name:     payload.Name,
 		Input:    cloneInput(payload.Input),
 		Output:   payload.Output,

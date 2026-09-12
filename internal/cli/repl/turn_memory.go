@@ -2,12 +2,12 @@ package repl
 
 import (
 	"encoding/json"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"maps"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/llm/compress"
 	"github.com/mochow13/keen-code/internal/tools"
 )
@@ -28,7 +28,7 @@ var retainedHistoricalToolInputs = map[string]struct{}{
 }
 
 type turnMemoryAccumulator struct {
-	toolActivity []llm.HistoricalToolActivity
+	toolActivity []core.HistoricalToolActivity
 	retainOutput bool
 }
 
@@ -43,9 +43,9 @@ func (a *turnMemoryAccumulator) RecordToolActivity(segments []streamSegment, wor
 	a.toolActivity = collectHistoricalToolActivity(segments, workingDir, a.retainOutput)
 }
 
-func collectHistoricalToolActivity(segments []streamSegment, workingDir string, retainOutput bool) []llm.HistoricalToolActivity {
+func collectHistoricalToolActivity(segments []streamSegment, workingDir string, retainOutput bool) []core.HistoricalToolActivity {
 	textOffset := 0
-	activities := make([]llm.HistoricalToolActivity, 0)
+	activities := make([]core.HistoricalToolActivity, 0)
 
 	for _, segment := range segments {
 		switch segment.kind {
@@ -65,8 +65,8 @@ func collectHistoricalToolActivity(segments []streamSegment, workingDir string, 
 	return activities
 }
 
-func historicalToolActivity(toolCall *llm.ToolCall, textOffset int, workingDir, bashCommand string, retainOutput bool) llm.HistoricalToolActivity {
-	activity := llm.HistoricalToolActivity{
+func historicalToolActivity(toolCall *core.ToolCall, textOffset int, workingDir, bashCommand string, retainOutput bool) core.HistoricalToolActivity {
+	activity := core.HistoricalToolActivity{
 		TextOffset: textOffset,
 		Tool:       toolCall.Name,
 		Status:     "success",
@@ -160,12 +160,12 @@ func truncatesHistoricalToolInput(tool string) bool {
 	return tool == tools.WriteFileToolName || tool == tools.EditFileToolName
 }
 
-func (a *turnMemoryAccumulator) Build() *llm.TurnMemory {
+func (a *turnMemoryAccumulator) Build() *core.TurnMemory {
 	if a == nil || len(a.toolActivity) == 0 {
 		return nil
 	}
 
-	return llm.CloneTurnMemory(&llm.TurnMemory{ToolActivity: a.toolActivity})
+	return core.CloneTurnMemory(&core.TurnMemory{ToolActivity: a.toolActivity})
 }
 
 func extractIntField(output any, key string) (int, bool) {
@@ -202,7 +202,7 @@ func (m *replModel) recordHistoricalToolActivity(segments []streamSegment) {
 	m.turnMemory.RecordToolActivity(segments, m.turnMemoryWorkingDir())
 }
 
-func (m *replModel) consumeTurnMemory() *llm.TurnMemory {
+func (m *replModel) consumeTurnMemory() *core.TurnMemory {
 	if m == nil || m.turnMemory == nil {
 		return nil
 	}

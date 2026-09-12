@@ -5,11 +5,14 @@ import (
 	"fmt"
 
 	"github.com/mochow13/keen-code/internal/llm/compress"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/tools"
+	"log/slog"
+	"time"
 )
 
-func historicalToolActivity(name string, input map[string]any, output, llmOutput any, execErr error) HistoricalToolActivity {
-	activity := HistoricalToolActivity{
+func historicalToolActivity(name string, input map[string]any, output, llmOutput any, execErr error) core.HistoricalToolActivity {
+	activity := core.HistoricalToolActivity{
 		Tool:         name,
 		Input:        input,
 		HasRawOutput: true,
@@ -26,12 +29,42 @@ func historicalToolActivity(name string, input map[string]any, output, llmOutput
 	return activity
 }
 
+type toolExecution struct {
+	RawOutput any
+	LLMOutput any
+	Err       error
+	Activity  core.HistoricalToolActivity
+}
+
+func executeTool(ctx context.Context, registry *tools.Registry, name string, input map[string]any, eventCh chan<- core.StreamEvent) toolExecution {
+	start := time.Now()
+	rawOutput, llmOutput, err, started := executeValidatedTool(ctx, registry, name, input, eventCh)
+	duration := time.Since(start)
+	toolCall := &core.ToolCall{Name: name, Input: input, Output: rawOutput, Duration: duration}
+	if err != nil {
+		toolCall.Error = err.Error()
+		slog.Debug("Tool response", "tool", name, "error", err.Error(), "duration", duration)
+		if started {
+			eventCh <- core.StreamEvent{Type: core.StreamEventTypeToolEnd, ToolCall: toolCall}
+		}
+	} else {
+		slog.Debug("Tool response", "tool", name, "duration", duration)
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeToolEnd, ToolCall: toolCall}
+	}
+	return toolExecution{
+		RawOutput: rawOutput,
+		LLMOutput: llmOutput,
+		Err:       err,
+		Activity:  historicalToolActivity(name, input, rawOutput, llmOutput, err),
+	}
+}
+
 func executeValidatedTool(
 	ctx context.Context,
 	registry *tools.Registry,
 	name string,
 	input map[string]any,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) (rawOutput, llmOutput any, err error, started bool) {
 	if registry == nil {
 		return nil, nil, fmt.Errorf("tool registry not available"), false
@@ -43,9 +76,9 @@ func executeValidatedTool(
 	if err := tools.ValidateInput(ctx, tool, input); err != nil {
 		return nil, nil, err, false
 	}
-	eventCh <- StreamEvent{
-		Type: StreamEventTypeToolStart,
-		ToolCall: &ToolCall{
+	eventCh <- core.StreamEvent{
+		Type: core.StreamEventTypeToolStart,
+		ToolCall: &core.ToolCall{
 			Name:  name,
 			Input: input,
 		},

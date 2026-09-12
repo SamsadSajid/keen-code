@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
 )
 
 func TestNewClient_MissingAPIKey(t *testing.T) {
@@ -108,15 +110,15 @@ func TestNewClient_OpenAI(t *testing.T) {
 		t.Fatalf("expected *OpenAIResponsesClient, got %T", client)
 	}
 
-	if responsesClient.provider != Provider(config.ProviderOpenAI) {
+	if responsesClient.provider != providerconfig.Provider(config.ProviderOpenAI) {
 		t.Errorf("expected provider openai, got %s", responsesClient.provider)
 	}
 
 	if responsesClient.model != "gpt-5.4-mini" {
 		t.Errorf("expected model gpt-5.4-mini, got %s", responsesClient.model)
 	}
-	if responsesClient.contextWindowTokenCount != defaultContextWindowTokenCount {
-		t.Errorf("expected fallback context window %d, got %d", defaultContextWindowTokenCount, responsesClient.contextWindowTokenCount)
+	if responsesClient.contextWindowTokenCount != core.DefaultContextWindowTokenCount {
+		t.Errorf("expected fallback context window %d, got %d", core.DefaultContextWindowTokenCount, responsesClient.contextWindowTokenCount)
 	}
 }
 
@@ -141,7 +143,7 @@ func TestNewClient_Gemini(t *testing.T) {
 		t.Error("expected *GenkitClient type")
 	}
 
-	if genkitClient.provider != Provider(config.ProviderGoogleAI) {
+	if genkitClient.provider != providerconfig.Provider(config.ProviderGoogleAI) {
 		t.Errorf("expected provider googleai, got %s", genkitClient.provider)
 	}
 
@@ -170,7 +172,7 @@ func TestNewClient_OpenCodeGoOpenAICompatibleModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *OpenAICompatibleClient, got %T", client)
 	}
-	if oaiClient.provider != Provider(config.ProviderOpenCodeGo) {
+	if oaiClient.provider != providerconfig.Provider(config.ProviderOpenCodeGo) {
 		t.Fatalf("expected provider opencode-go, got %s", oaiClient.provider)
 	}
 	if oaiClient.model != "kimi-k2.6" {
@@ -267,7 +269,7 @@ func TestNewClient_OpenCodeGoResponsesModel(t *testing.T) {
 			if !ok {
 				t.Fatalf("expected *OpenAIResponsesClient, got %T", client)
 			}
-			if responsesClient.provider != Provider(config.ProviderOpenCodeGo) {
+			if responsesClient.provider != providerconfig.Provider(config.ProviderOpenCodeGo) {
 				t.Fatalf("expected provider opencode-go, got %s", responsesClient.provider)
 			}
 			if responsesClient.thinkingEffort != tt.thinkingEffort {
@@ -294,7 +296,7 @@ func TestNewClient_MiniMax(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *AnthropicClient, got %T", client)
 	}
-	if anthropicClient.provider != Provider(config.ProviderMiniMax) {
+	if anthropicClient.provider != providerconfig.Provider(config.ProviderMiniMax) {
 		t.Fatalf("expected provider minimax, got %s", anthropicClient.provider)
 	}
 	if anthropicClient.model != "MiniMax-M3" {
@@ -344,14 +346,14 @@ func TestNewClient_ZAI(t *testing.T) {
 		t.Fatalf("expected *OpenAICompatibleClient, got %T", client)
 	}
 
-	if oaiClient.provider != Provider(config.ProviderZAI) {
+	if oaiClient.provider != providerconfig.Provider(config.ProviderZAI) {
 		t.Errorf("expected provider zai, got %s", oaiClient.provider)
 	}
 	if oaiClient.model != "glm-4-plus" {
 		t.Errorf("expected model glm-4-plus, got %s", oaiClient.model)
 	}
-	if oaiClient.contextWindowTokenCount != defaultContextWindowTokenCount {
-		t.Errorf("expected fallback context window %d, got %d", defaultContextWindowTokenCount, oaiClient.contextWindowTokenCount)
+	if oaiClient.contextWindowTokenCount != core.DefaultContextWindowTokenCount {
+		t.Errorf("expected fallback context window %d, got %d", core.DefaultContextWindowTokenCount, oaiClient.contextWindowTokenCount)
 	}
 }
 
@@ -398,13 +400,13 @@ func TestNewClient_DeepSeek(t *testing.T) {
 		t.Fatalf("expected *OpenAICompatibleClient, got %T", client)
 	}
 
-	if oaiClient.provider != Provider(config.ProviderDeepSeek) {
+	if oaiClient.provider != providerconfig.Provider(config.ProviderDeepSeek) {
 		t.Errorf("expected provider deepseek, got %s", oaiClient.provider)
 	}
 	if oaiClient.model != "deepseek-chat" {
 		t.Errorf("expected model deepseek-chat, got %s", oaiClient.model)
 	}
-	if oaiClient.contextWindowTokenCount != defaultContextWindowTokenCount {
-		t.Errorf("expected fallback context window %d, got %d", defaultContextWindowTokenCount, oaiClient.contextWindowTokenCount)
+	if oaiClient.contextWindowTokenCount != core.DefaultContextWindowTokenCount {
+		t.Errorf("expected fallback context window %d, got %d", core.DefaultContextWindowTokenCount, oaiClient.contextWindowTokenCount)
 	}
 }

@@ -3,6 +3,7 @@ package repl
 import (
 	"context"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"os"
 	"path/filepath"
 	"strings"
@@ -435,10 +436,10 @@ func (m *replModel) submitInput(input string, fromQueue bool) (replModel, tea.Cm
 		return *m, nil
 	}
 
-	m.appState.AddMessage(llm.RoleUser, input)
+	m.appState.AddMessage(core.RoleUser, input)
 
 	ctx := m.startStreamContext()
-	eventCh, err := m.appState.StreamChat(ctx, m.ctx.cfg, llm.StreamOptions{SessionID: m.sessions.currentID()})
+	eventCh, err := m.appState.StreamChat(ctx, m.ctx.cfg, core.StreamOptions{SessionID: m.sessions.currentID()})
 	if err != nil {
 		m.clearStreamCancel()
 		m.output.AddError(err.Error(), repltheme.ErrorStyle)

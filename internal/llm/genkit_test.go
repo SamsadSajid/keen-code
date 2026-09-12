@@ -12,6 +12,8 @@ import (
 	"github.com/firebase/genkit/go/ai"
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
 	"github.com/mochow13/keen-code/internal/tools"
 	"google.golang.org/genai"
 )
@@ -19,7 +21,7 @@ import (
 func TestGenkitClient_StreamChat_Success(t *testing.T) {
 	client := &GenkitClient{
 		g:        &genkit.Genkit{},
-		provider: Provider(config.ProviderGoogleAI),
+		provider: providerconfig.Provider(config.ProviderGoogleAI),
 		model:    "googleai/gemini-pro",
 	}
 
@@ -40,8 +42,8 @@ func TestGenkitClient_StreamChat_Success(t *testing.T) {
 		}
 	}
 
-	messages := []Message{
-		{Role: RoleUser, Content: "Hi"},
+	messages := []core.Message{
+		{Role: core.RoleUser, Content: "Hi"},
 	}
 
 	eventCh, err := client.StreamChat(context.Background(), messages, nil)
@@ -54,11 +56,11 @@ func TestGenkitClient_StreamChat_Success(t *testing.T) {
 
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			receivedChunks = append(receivedChunks, event.Content)
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			doneReceived = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error event: %v", event.Error)
 		}
 	}
@@ -84,7 +86,7 @@ func TestGenkitClient_StreamChat_Success(t *testing.T) {
 func TestGenkitClient_StreamChat_Error(t *testing.T) {
 	client := &GenkitClient{
 		g:          &genkit.Genkit{},
-		provider:   Provider(config.ProviderGoogleAI),
+		provider:   providerconfig.Provider(config.ProviderGoogleAI),
 		model:      "googleai/gemini-pro",
 		maxRetries: 1,
 	}
@@ -96,8 +98,8 @@ func TestGenkitClient_StreamChat_Error(t *testing.T) {
 		}
 	}
 
-	messages := []Message{
-		{Role: RoleUser, Content: "Hi"},
+	messages := []core.Message{
+		{Role: core.RoleUser, Content: "Hi"},
 	}
 
 	eventCh, err := client.StreamChat(context.Background(), messages, nil)
@@ -109,7 +111,7 @@ func TestGenkitClient_StreamChat_Error(t *testing.T) {
 	var receivedErr error
 
 	for event := range eventCh {
-		if event.Type == StreamEventTypeError {
+		if event.Type == core.StreamEventTypeError {
 			errorReceived = true
 			receivedErr = event.Error
 		}
@@ -130,7 +132,7 @@ func TestGenkitClient_StreamChat_RetriesOnRetryableError(t *testing.T) {
 	callCount := 0
 	client := &GenkitClient{
 		g:          &genkit.Genkit{},
-		provider:   Provider(config.ProviderGoogleAI),
+		provider:   providerconfig.Provider(config.ProviderGoogleAI),
 		model:      "googleai/gemini-pro",
 		maxRetries: testMaxRetries,
 	}
@@ -142,18 +144,18 @@ func TestGenkitClient_StreamChat_RetriesOnRetryableError(t *testing.T) {
 		}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "Hi"}}, nil)
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "Hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var retryEvents []StreamEvent
+	var retryEvents []core.StreamEvent
 	var receivedErr error
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeRetry:
+		case core.StreamEventTypeRetry:
 			retryEvents = append(retryEvents, event)
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			receivedErr = event.Error
 		}
 	}
@@ -175,7 +177,7 @@ func TestGenkitClient_StreamChat_RetriesOnRetryableError(t *testing.T) {
 func TestGenkitClient_StreamChat_EmptyMessages(t *testing.T) {
 	client := &GenkitClient{
 		g:        &genkit.Genkit{},
-		provider: Provider(config.ProviderGoogleAI),
+		provider: providerconfig.Provider(config.ProviderGoogleAI),
 		model:    "googleai/gemini-pro",
 	}
 
@@ -185,14 +187,14 @@ func TestGenkitClient_StreamChat_EmptyMessages(t *testing.T) {
 		}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{}, nil)
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var doneReceived bool
 	for event := range eventCh {
-		if event.Type == StreamEventTypeDone {
+		if event.Type == core.StreamEventTypeDone {
 			doneReceived = true
 		}
 	}
@@ -205,7 +207,7 @@ func TestGenkitClient_StreamChat_EmptyMessages(t *testing.T) {
 func TestGenkitClient_StreamChat_ContextCancellation(t *testing.T) {
 	client := &GenkitClient{
 		g:        &genkit.Genkit{},
-		provider: Provider(config.ProviderGoogleAI),
+		provider: providerconfig.Provider(config.ProviderGoogleAI),
 		model:    "googleai/gemini-pro",
 	}
 
@@ -219,12 +221,12 @@ func TestGenkitClient_StreamChat_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	messages := []Message{{Role: RoleUser, Content: "Hello"}}
+	messages := []core.Message{{Role: core.RoleUser, Content: "Hello"}}
 	eventCh, _ := client.StreamChat(ctx, messages, nil)
 
 	var errorReceived bool
 	for event := range eventCh {
-		if event.Type == StreamEventTypeError {
+		if event.Type == core.StreamEventTypeError {
 			errorReceived = true
 		}
 	}
@@ -237,7 +239,7 @@ func TestGenkitClient_StreamChat_ContextCancellation(t *testing.T) {
 func TestGenkitClient_StreamChat_MultipleMessages(t *testing.T) {
 	client := &GenkitClient{
 		g:        &genkit.Genkit{},
-		provider: Provider(config.ProviderGoogleAI),
+		provider: providerconfig.Provider(config.ProviderGoogleAI),
 		model:    "googleai/gemini-pro",
 	}
 
@@ -247,10 +249,10 @@ func TestGenkitClient_StreamChat_MultipleMessages(t *testing.T) {
 		}
 	}
 
-	messages := []Message{
-		{Role: RoleSystem, Content: "You are helpful"},
-		{Role: RoleUser, Content: "Hello"},
-		{Role: RoleUser, Content: "How are you?"},
+	messages := []core.Message{
+		{Role: core.RoleSystem, Content: "You are helpful"},
+		{Role: core.RoleUser, Content: "Hello"},
+		{Role: core.RoleUser, Content: "How are you?"},
 	}
 
 	eventCh, err := client.StreamChat(context.Background(), messages, nil)
@@ -260,7 +262,7 @@ func TestGenkitClient_StreamChat_MultipleMessages(t *testing.T) {
 
 	var doneReceived bool
 	for event := range eventCh {
-		if event.Type == StreamEventTypeDone {
+		if event.Type == core.StreamEventTypeDone {
 			doneReceived = true
 		}
 	}
@@ -271,12 +273,12 @@ func TestGenkitClient_StreamChat_MultipleMessages(t *testing.T) {
 }
 
 func TestToGenkitMessages_RendersTurnMemoryForAssistant(t *testing.T) {
-	messages := toGenkitMessages([]Message{
+	messages := toGenkitMessages([]core.Message{
 		{
-			Role:    RoleAssistant,
+			Role:    core.RoleAssistant,
 			Content: "done",
-			TurnMemory: &TurnMemory{
-				ToolActivity: []HistoricalToolActivity{{Tool: "read_file", Input: map[string]any{"path": "a.go"}, Status: "success"}},
+			TurnMemory: &core.TurnMemory{
+				ToolActivity: []core.HistoricalToolActivity{{Tool: "read_file", Input: map[string]any{"path": "a.go"}, Status: "success"}},
 			},
 		},
 	})
@@ -296,7 +298,7 @@ func TestToGenkitMessages_RendersTurnMemoryForAssistant(t *testing.T) {
 func TestGenkitClient_StreamChat_EmptyChunkContent(t *testing.T) {
 	client := &GenkitClient{
 		g:        &genkit.Genkit{},
-		provider: Provider(config.ProviderGoogleAI),
+		provider: providerconfig.Provider(config.ProviderGoogleAI),
 		model:    "googleai/gemini-pro",
 	}
 
@@ -313,7 +315,7 @@ func TestGenkitClient_StreamChat_EmptyChunkContent(t *testing.T) {
 		}
 	}
 
-	messages := []Message{{Role: RoleUser, Content: "Hello"}}
+	messages := []core.Message{{Role: core.RoleUser, Content: "Hello"}}
 	eventCh, _ := client.StreamChat(context.Background(), messages, nil)
 
 	var chunkCount int
@@ -321,9 +323,9 @@ func TestGenkitClient_StreamChat_EmptyChunkContent(t *testing.T) {
 
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			chunkCount++
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			doneReceived = true
 		}
 	}
@@ -353,7 +355,7 @@ func TestGenkitClient_executeTools_Success(t *testing.T) {
 		},
 	}
 
-	eventCh := make(chan StreamEvent, 4)
+	eventCh := make(chan core.StreamEvent, 4)
 	parts, activities := client.executeTools(context.Background(), toolRequests, registry, eventCh)
 
 	if len(parts) != 1 {
@@ -364,19 +366,19 @@ func TestGenkitClient_executeTools_Success(t *testing.T) {
 	}
 
 	startEvent := <-eventCh
-	if startEvent.Type != StreamEventTypeToolStart {
-		t.Fatalf("expected first event %q, got %q", StreamEventTypeToolStart, startEvent.Type)
+	if startEvent.Type != core.StreamEventTypeToolStart {
+		t.Fatalf("expected first event %q, got %q", core.StreamEventTypeToolStart, startEvent.Type)
 	}
 	if startEvent.ToolCall == nil || startEvent.ToolCall.Name != "success_tool" {
 		t.Fatalf("unexpected tool_start event payload: %+v", startEvent.ToolCall)
 	}
 
 	endEvent := <-eventCh
-	if endEvent.Type != StreamEventTypeToolEnd {
-		t.Fatalf("expected second event %q, got %q", StreamEventTypeToolEnd, endEvent.Type)
+	if endEvent.Type != core.StreamEventTypeToolEnd {
+		t.Fatalf("expected second event %q, got %q", core.StreamEventTypeToolEnd, endEvent.Type)
 	}
 	if endEvent.ToolCall == nil {
-		t.Fatal("expected tool_end ToolCall")
+		t.Fatal("expected tool_end core.ToolCall")
 	}
 	if endEvent.ToolCall.Error != "" {
 		t.Fatalf("expected empty tool error, got %q", endEvent.ToolCall.Error)
@@ -404,7 +406,7 @@ func TestGenkitClient_executeTools_Success(t *testing.T) {
 func TestGenkitClient_StreamChat_ToolInvocation(t *testing.T) {
 	client := &GenkitClient{
 		g:        &genkit.Genkit{},
-		provider: Provider(config.ProviderGoogleAI),
+		provider: providerconfig.Provider(config.ProviderGoogleAI),
 		model:    "googleai/gemini-pro",
 	}
 
@@ -458,8 +460,8 @@ func TestGenkitClient_StreamChat_ToolInvocation(t *testing.T) {
 		t.Fatalf("failed to register tool: %v", err)
 	}
 
-	messages := []Message{
-		{Role: RoleUser, Content: "Call the tool"},
+	messages := []core.Message{
+		{Role: core.RoleUser, Content: "Call the tool"},
 	}
 
 	eventCh, err := client.StreamChat(context.Background(), messages, registry)
@@ -474,28 +476,28 @@ func TestGenkitClient_StreamChat_ToolInvocation(t *testing.T) {
 
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			chunks = append(chunks, event.Content)
-		case StreamEventTypeToolStart:
+		case core.StreamEventTypeToolStart:
 			toolStartReceived = true
 			if event.ToolCall == nil {
-				t.Error("expected ToolCall in tool_start event")
+				t.Error("expected core.ToolCall in tool_start event")
 			} else if event.ToolCall.Name != "success_tool" {
 				t.Errorf("expected tool name 'success_tool', got %q", event.ToolCall.Name)
 			}
-		case StreamEventTypeToolEnd:
+		case core.StreamEventTypeToolEnd:
 			toolEndReceived = true
 			if event.ToolCall == nil {
-				t.Error("expected ToolCall in tool_end event")
+				t.Error("expected core.ToolCall in tool_end event")
 			} else if event.ToolCall.Name != "success_tool" {
 				t.Errorf("expected tool name 'success_tool', got %q", event.ToolCall.Name)
 			}
 			if event.ToolCall.Output == nil {
 				t.Error("expected tool output in tool_end event")
 			}
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			doneReceived = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error event: %v", event.Error)
 		}
 	}
@@ -533,7 +535,7 @@ func TestGenkitClient_executeTools_Error(t *testing.T) {
 		},
 	}
 
-	eventCh := make(chan StreamEvent, 4)
+	eventCh := make(chan core.StreamEvent, 4)
 	parts, activities := client.executeTools(context.Background(), toolRequests, registry, eventCh)
 
 	if len(parts) != 1 {
@@ -544,16 +546,16 @@ func TestGenkitClient_executeTools_Error(t *testing.T) {
 	}
 
 	startEvent := <-eventCh
-	if startEvent.Type != StreamEventTypeToolStart {
-		t.Fatalf("expected first event %q, got %q", StreamEventTypeToolStart, startEvent.Type)
+	if startEvent.Type != core.StreamEventTypeToolStart {
+		t.Fatalf("expected first event %q, got %q", core.StreamEventTypeToolStart, startEvent.Type)
 	}
 
 	endEvent := <-eventCh
-	if endEvent.Type != StreamEventTypeToolEnd {
-		t.Fatalf("expected second event %q, got %q", StreamEventTypeToolEnd, endEvent.Type)
+	if endEvent.Type != core.StreamEventTypeToolEnd {
+		t.Fatalf("expected second event %q, got %q", core.StreamEventTypeToolEnd, endEvent.Type)
 	}
 	if endEvent.ToolCall == nil {
-		t.Fatal("expected tool_end ToolCall")
+		t.Fatal("expected tool_end core.ToolCall")
 	}
 	if endEvent.ToolCall.Error != "tool failed" {
 		t.Fatalf("expected tool error 'tool failed', got %q", endEvent.ToolCall.Error)
@@ -582,7 +584,7 @@ func TestGenkitClient_PendingState_ErrorMidLoop(t *testing.T) {
 	callCount := 0
 	client := &GenkitClient{
 		g:          &genkit.Genkit{},
-		provider:   Provider(config.ProviderGoogleAI),
+		provider:   providerconfig.Provider(config.ProviderGoogleAI),
 		model:      "googleai/gemini-pro",
 		maxRetries: 1,
 	}
@@ -618,7 +620,7 @@ func TestGenkitClient_PendingState_ErrorMidLoop(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "go"}}, registry)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "go"}}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -627,10 +629,10 @@ func TestGenkitClient_PendingState_ErrorMidLoop(t *testing.T) {
 	var incompleteErr error
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			hasIncomplete = true
 			incompleteErr = ev.Error
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("expected incomplete, got error: %v", ev.Error)
 		}
 	}
@@ -660,7 +662,7 @@ func TestGenkitClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	var capturedOpts [][]ai.GenerateOption
 	client := &GenkitClient{
 		g:          &genkit.Genkit{},
-		provider:   Provider(config.ProviderGoogleAI),
+		provider:   providerconfig.Provider(config.ProviderGoogleAI),
 		model:      "googleai/gemini-pro",
 		maxRetries: 1,
 	}
@@ -712,7 +714,7 @@ func TestGenkitClient_PendingState_InjectedOnNextCall(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "go"}}, registry)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "go"}}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -724,9 +726,9 @@ func TestGenkitClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	}
 	savedLen := len(client.pendingState)
 
-	ch, err = client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "go"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err = client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "go"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -736,11 +738,11 @@ func TestGenkitClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	var streamed strings.Builder
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			hasDone = true
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			streamed.WriteString(ev.Content)
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -769,7 +771,7 @@ func TestGenkitClient_PendingState_InjectedOnNextCall(t *testing.T) {
 func TestGenkitClient_PendingState_PreservedWhenRecoveryFailsBeforeProgress(t *testing.T) {
 	client := &GenkitClient{
 		g:          &genkit.Genkit{},
-		provider:   Provider(config.ProviderGoogleAI),
+		provider:   providerconfig.Provider(config.ProviderGoogleAI),
 		model:      "googleai/gemini-pro",
 		maxRetries: 1,
 		pendingState: []*ai.Message{
@@ -786,9 +788,9 @@ func TestGenkitClient_PendingState_PreservedWhenRecoveryFailsBeforeProgress(t *t
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "go"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "go"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -797,9 +799,9 @@ func TestGenkitClient_PendingState_PreservedWhenRecoveryFailsBeforeProgress(t *t
 	var hasIncomplete bool
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			hasIncomplete = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("expected incomplete, got error: %v", ev.Error)
 		}
 	}
@@ -816,7 +818,7 @@ func TestGenkitClient_PendingState_NoAccumulation_EmitsError(t *testing.T) {
 	expectedErr := errors.New("API error")
 	client := &GenkitClient{
 		g:          &genkit.Genkit{},
-		provider:   Provider(config.ProviderGoogleAI),
+		provider:   providerconfig.Provider(config.ProviderGoogleAI),
 		model:      "googleai/gemini-pro",
 		maxRetries: 1,
 	}
@@ -826,7 +828,7 @@ func TestGenkitClient_PendingState_NoAccumulation_EmitsError(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -834,9 +836,9 @@ func TestGenkitClient_PendingState_NoAccumulation_EmitsError(t *testing.T) {
 	var hasError bool
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			hasError = true
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			t.Fatal("expected error, not incomplete")
 		}
 	}
@@ -852,7 +854,7 @@ func TestGenkitClient_PendingState_NoAccumulation_EmitsError(t *testing.T) {
 func TestGenkitClient_PendingState_ClearedOnSuccess(t *testing.T) {
 	client := &GenkitClient{
 		g:        &genkit.Genkit{},
-		provider: Provider(config.ProviderGoogleAI),
+		provider: providerconfig.Provider(config.ProviderGoogleAI),
 		model:    "googleai/gemini-pro",
 		pendingState: []*ai.Message{
 			{Role: ai.RoleModel, Content: []*ai.Part{ai.NewTextPart("prior tool use")}},
@@ -878,9 +880,9 @@ func TestGenkitClient_PendingState_ClearedOnSuccess(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "original"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "original"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -888,7 +890,7 @@ func TestGenkitClient_PendingState_ClearedOnSuccess(t *testing.T) {
 
 	var hasDone bool
 	for ev := range ch {
-		if ev.Type == StreamEventTypeDone {
+		if ev.Type == core.StreamEventTypeDone {
 			hasDone = true
 		}
 	}
@@ -902,7 +904,7 @@ func TestGenkitClient_PendingState_ClearedOnSuccess(t *testing.T) {
 }
 
 func TestBuildGenkitGenerateConfig_CustomHeaders(t *testing.T) {
-	cfg := buildGenkitGenerateConfig("", Provider(config.ProviderGoogleAI), map[string]string{
+	cfg := buildGenkitGenerateConfig("", providerconfig.Provider(config.ProviderGoogleAI), map[string]string{
 		"x-custom-header": "custom-value",
 		"x-another":       "another-value",
 	})
@@ -921,7 +923,7 @@ func TestBuildGenkitGenerateConfig_CustomHeaders(t *testing.T) {
 }
 
 func TestBuildGenkitGenerateConfig_HeadersWithThinking(t *testing.T) {
-	cfg := buildGenkitGenerateConfig("low", Provider(config.ProviderGoogleAI), map[string]string{
+	cfg := buildGenkitGenerateConfig("low", providerconfig.Provider(config.ProviderGoogleAI), map[string]string{
 		"x-custom-header": "custom-value",
 	})
 	if cfg == nil {
@@ -939,7 +941,7 @@ func TestBuildGenkitGenerateConfig_HeadersWithThinking(t *testing.T) {
 }
 
 func TestBuildGenkitGenerateConfig_NoHeaders(t *testing.T) {
-	cfg := buildGenkitGenerateConfig("", Provider(config.ProviderGoogleAI), nil)
+	cfg := buildGenkitGenerateConfig("", providerconfig.Provider(config.ProviderGoogleAI), nil)
 	if cfg != nil {
 		t.Fatalf("expected nil config without thinking or headers, got %+v", cfg)
 	}
@@ -974,7 +976,7 @@ func TestGenkitGenerateConfig_CustomHeadersReachWire(t *testing.T) {
 		t.Fatalf("failed to create genai client: %v", err)
 	}
 
-	cfg := buildGenkitGenerateConfig("", Provider(config.ProviderGoogleAI), map[string]string{
+	cfg := buildGenkitGenerateConfig("", providerconfig.Provider(config.ProviderGoogleAI), map[string]string{
 		"x-custom-header": "custom-value",
 		"x-another":       "another-value",
 	})

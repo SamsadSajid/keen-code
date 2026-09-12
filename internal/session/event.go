@@ -1,9 +1,9 @@
 package session
 
 import (
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"time"
 
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -50,7 +50,7 @@ const (
 type AssistantTurnPayload struct {
 	Transcript  []TranscriptItem `json:"transcript,omitempty"`
 	Message     string           `json:"message,omitempty"`
-	TurnMemory  *llm.TurnMemory  `json:"turn_memory,omitempty"`
+	TurnMemory  *core.TurnMemory `json:"turn_memory,omitempty"`
 	Interrupted bool             `json:"interrupted,omitempty"`
 	Error       string           `json:"error,omitempty"`
 }
@@ -92,7 +92,7 @@ type DiffPayload struct {
 type CompactionAppliedPayload struct {
 	Status     string           `json:"status"`
 	Transcript []TranscriptItem `json:"transcript,omitempty"`
-	Messages   []llm.Message    `json:"messages"`
+	Messages   []core.Message   `json:"messages"`
 }
 
 type Summary struct {
@@ -105,6 +105,6 @@ type Summary struct {
 	LastSeq         uint64
 }
 
-func cloneMessages(messages []llm.Message) []llm.Message {
-	return llm.CloneMessages(messages)
+func cloneMessages(messages []core.Message) []core.Message {
+	return core.CloneMessages(messages)
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,21 +13,20 @@ import (
 
 	"github.com/mochow13/keen-code/internal/cli/repl/appstate"
 	"github.com/mochow13/keen-code/internal/config"
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/session"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
 type recordingHeadlessClient struct {
-	events   []llm.StreamEvent
-	messages [][]llm.Message
-	opts     [][]llm.StreamOptions
+	events   []core.StreamEvent
+	messages [][]core.Message
+	opts     [][]core.StreamOptions
 }
 
-func (c *recordingHeadlessClient) StreamChat(ctx context.Context, messages []llm.Message, toolRegistry *tools.Registry, opts ...llm.StreamOptions) (<-chan llm.StreamEvent, error) {
-	c.messages = append(c.messages, llm.CloneMessages(messages))
-	c.opts = append(c.opts, append([]llm.StreamOptions(nil), opts...))
-	ch := make(chan llm.StreamEvent, len(c.events))
+func (c *recordingHeadlessClient) StreamChat(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
+	c.messages = append(c.messages, core.CloneMessages(messages))
+	c.opts = append(c.opts, append([]core.StreamOptions(nil), opts...))
+	ch := make(chan core.StreamEvent, len(c.events))
 	go func() {
 		defer close(ch)
 		for _, event := range c.events {
@@ -44,12 +44,12 @@ func (c *recordingHeadlessClient) Reset() {}
 
 func TestRunHeadless_StreamsProgress(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "Let me check."},
-		{Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "foo.go"}}},
-		{Type: llm.StreamEventTypeToolEnd, ToolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "foo.go"}}},
-		{Type: llm.StreamEventTypeChunk, Content: " Done."},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "Let me check."},
+		{Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "foo.go"}}},
+		{Type: core.StreamEventTypeToolEnd, ToolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "foo.go"}}},
+		{Type: core.StreamEventTypeChunk, Content: " Done."},
+		{Type: core.StreamEventTypeDone},
 	}}
 	var out bytes.Buffer
 	var progress bytes.Buffer
@@ -88,12 +88,12 @@ func TestRunHeadless_ProgressHidesExpectedToolFailures(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
 	tests := []struct {
 		name      string
-		toolCall  *llm.ToolCall
+		toolCall  *core.ToolCall
 		forbidden string
 	}{
 		{
 			name: "missing read file",
-			toolCall: &llm.ToolCall{
+			toolCall: &core.ToolCall{
 				Name:  "read_file",
 				Error: `not found: file "missing.go" does not exist`,
 			},
@@ -101,7 +101,7 @@ func TestRunHeadless_ProgressHidesExpectedToolFailures(t *testing.T) {
 		},
 		{
 			name: "stale edit anchor",
-			toolCall: &llm.ToolCall{
+			toolCall: &core.ToolCall{
 				Name:  "edit_file",
 				Error: `op 1: anchor "2:fff" does not exist in the current file snapshot; re-read the file and retry`,
 			},
@@ -111,11 +111,11 @@ func TestRunHeadless_ProgressHidesExpectedToolFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &recordingHeadlessClient{events: []llm.StreamEvent{
-				{Type: llm.StreamEventTypeChunk, Content: "Trying."},
-				{Type: llm.StreamEventTypeToolEnd, ToolCall: tt.toolCall},
-				{Type: llm.StreamEventTypeChunk, Content: " Retrying."},
-				{Type: llm.StreamEventTypeDone},
+			client := &recordingHeadlessClient{events: []core.StreamEvent{
+				{Type: core.StreamEventTypeChunk, Content: "Trying."},
+				{Type: core.StreamEventTypeToolEnd, ToolCall: tt.toolCall},
+				{Type: core.StreamEventTypeChunk, Content: " Retrying."},
+				{Type: core.StreamEventTypeDone},
 			}}
 			var progress bytes.Buffer
 
@@ -140,9 +140,9 @@ func TestRunHeadless_ProgressHidesExpectedToolFailures(t *testing.T) {
 
 func TestRunHeadless_ProgressDisabledForJSON(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "json response"},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "json response"},
+		{Type: core.StreamEventTypeDone},
 	}}
 	var out bytes.Buffer
 	var progress bytes.Buffer
@@ -166,10 +166,10 @@ func TestRunHeadless_ProgressDisabledForJSON(t *testing.T) {
 
 func TestRunHeadless_CreatesSessionAndWritesText(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "hello"},
-		{Type: llm.StreamEventTypeUsage, Usage: &llm.TokenUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "hello"},
+		{Type: core.StreamEventTypeUsage, Usage: &core.TokenUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}},
+		{Type: core.StreamEventTypeDone},
 	}}
 	var out bytes.Buffer
 
@@ -210,9 +210,9 @@ func TestRunHeadless_CreatesSessionAndWritesText(t *testing.T) {
 
 func TestRunHeadless_ResumesSessionConversation(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	firstClient := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "first response"},
-		{Type: llm.StreamEventTypeDone},
+	firstClient := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "first response"},
+		{Type: core.StreamEventTypeDone},
 	}}
 
 	first, err := RunHeadless(context.Background(), HeadlessRunOptions{
@@ -225,9 +225,9 @@ func TestRunHeadless_ResumesSessionConversation(t *testing.T) {
 		t.Fatalf("first RunHeadless() error = %v", err)
 	}
 
-	secondClient := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "second response"},
-		{Type: llm.StreamEventTypeDone},
+	secondClient := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "second response"},
+		{Type: core.StreamEventTypeDone},
 	}}
 	_, err = RunHeadless(context.Background(), HeadlessRunOptions{
 		WorkingDir: workingDir,
@@ -254,12 +254,12 @@ func TestRunHeadless_ResumesSessionConversation(t *testing.T) {
 
 func TestRunHeadless_PersistsHistoricalToolActivity(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "Let me inspect."},
-		{Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": filepath.Join(workingDir, "a.go")}}},
-		{Type: llm.StreamEventTypeToolEnd, ToolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": filepath.Join(workingDir, "a.go")}}},
-		{Type: llm.StreamEventTypeChunk, Content: " Found it."},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "Let me inspect."},
+		{Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": filepath.Join(workingDir, "a.go")}}},
+		{Type: core.StreamEventTypeToolEnd, ToolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": filepath.Join(workingDir, "a.go")}}},
+		{Type: core.StreamEventTypeChunk, Content: " Found it."},
+		{Type: core.StreamEventTypeDone},
 	}}
 
 	if _, err := RunHeadless(context.Background(), HeadlessRunOptions{
@@ -284,9 +284,9 @@ func TestRunHeadless_PersistsHistoricalToolActivity(t *testing.T) {
 
 func TestRunHeadless_CompletionSignalPresent(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "done <promise>COMPLETE</promise>"},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "done <promise>COMPLETE</promise>"},
+		{Type: core.StreamEventTypeDone},
 	}}
 	var out bytes.Buffer
 
@@ -308,9 +308,9 @@ func TestRunHeadless_CompletionSignalPresent(t *testing.T) {
 
 func TestRunHeadless_CompletionSignalMissing(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "done but not complete"},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "done but not complete"},
+		{Type: core.StreamEventTypeDone},
 	}}
 	var out bytes.Buffer
 
@@ -335,9 +335,9 @@ func TestRunHeadless_CompletionSignalMissing(t *testing.T) {
 
 func TestRunHeadless_WritesJSON(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "json response"},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "json response"},
+		{Type: core.StreamEventTypeDone},
 	}}
 	var out bytes.Buffer
 
@@ -403,12 +403,12 @@ func loadOnlyHeadlessSessionEvents(t *testing.T, workingDir string) []session.Ev
 
 func TestCheckpointHeadlessAutoCompactionRejectsEmptyReplacement(t *testing.T) {
 	handler := NewStreamHandler(nil)
-	handler.Start(make(chan llm.StreamEvent), "")
+	handler.Start(make(chan core.StreamEvent), "")
 	appState := appstate.New(nil, "/tmp")
 	completedText := &strings.Builder{}
 	turnMemory := newTurnMemoryAccumulator(false)
 
-	err := checkpointHeadlessAutoCompaction(nil, appState, handler, turnMemory, completedText, &llm.AutoCompactionEvent{})
+	err := checkpointHeadlessAutoCompaction(nil, appState, handler, turnMemory, completedText, &core.AutoCompactionEvent{})
 	if err == nil {
 		t.Fatal("expected empty replacement error")
 	}
@@ -419,16 +419,16 @@ func TestCheckpointHeadlessAutoCompactionRejectsEmptyReplacement(t *testing.T) {
 
 func TestRunHeadless_AutoCompactionFailureReturnsPartialOutput(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "before checkpoint"},
-		{Type: llm.StreamEventTypeAutoCompactionApplied, AutoCompaction: &llm.AutoCompactionEvent{
-			Replacement: []llm.Message{
-				{Role: llm.RoleSystem, Content: "provider system prompt"},
-				{Role: llm.RoleUser, Content: "compacted context"},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "before checkpoint"},
+		{Type: core.StreamEventTypeAutoCompactionApplied, AutoCompaction: &core.AutoCompactionEvent{
+			Replacement: []core.Message{
+				{Role: core.RoleSystem, Content: "provider system prompt"},
+				{Role: core.RoleUser, Content: "compacted context"},
 			},
 		}},
-		{Type: llm.StreamEventTypeChunk, Content: " after checkpoint"},
-		{Type: llm.StreamEventTypeError, Error: errors.New("provider failed")},
+		{Type: core.StreamEventTypeChunk, Content: " after checkpoint"},
+		{Type: core.StreamEventTypeError, Error: errors.New("provider failed")},
 	}}
 	var out bytes.Buffer
 
@@ -452,14 +452,14 @@ func TestRunHeadless_AutoCompactionFailureReturnsPartialOutput(t *testing.T) {
 
 func TestRunHeadless_AutoCompactionCheckpointsOutputAndSession(t *testing.T) {
 	workingDir := setupHeadlessTestHome(t)
-	client := &recordingHeadlessClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeChunk, Content: "before checkpoint"},
-		{Type: llm.StreamEventTypeReasoningChunk, Content: "private reasoning"},
-		{Type: llm.StreamEventTypeAutoCompactionApplied, AutoCompaction: &llm.AutoCompactionEvent{
-			Replacement: []llm.Message{{Role: llm.RoleUser, Content: "compacted context"}},
+	client := &recordingHeadlessClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeChunk, Content: "before checkpoint"},
+		{Type: core.StreamEventTypeReasoningChunk, Content: "private reasoning"},
+		{Type: core.StreamEventTypeAutoCompactionApplied, AutoCompaction: &core.AutoCompactionEvent{
+			Replacement: []core.Message{{Role: core.RoleUser, Content: "compacted context"}},
 		}},
-		{Type: llm.StreamEventTypeChunk, Content: " after checkpoint"},
-		{Type: llm.StreamEventTypeDone},
+		{Type: core.StreamEventTypeChunk, Content: " after checkpoint"},
+		{Type: core.StreamEventTypeDone},
 	}}
 	var out bytes.Buffer
 
@@ -492,12 +492,12 @@ func TestRunHeadless_AutoCompactionCheckpointsOutputAndSession(t *testing.T) {
 	if compaction == nil || compaction.Status != "" || len(compaction.Transcript) != 0 {
 		t.Fatalf("unexpected compaction event: %#v", compaction)
 	}
-	if got := session.BuildConversation(events); len(got) != 2 || got[0].Role != llm.RoleUser || got[0].Content != "compacted context" || got[1].Content != " after checkpoint" {
+	if got := session.BuildConversation(events); len(got) != 2 || got[0].Role != core.RoleUser || got[0].Content != "compacted context" || got[1].Content != " after checkpoint" {
 		t.Fatalf("unexpected projected conversation: %#v", got)
 	}
 }
 
-func messageContents(messages []llm.Message) []string {
+func messageContents(messages []core.Message) []string {
 	contents := make([]string, 0, len(messages))
 	for _, message := range messages {
 		contents = append(contents, message.Content)

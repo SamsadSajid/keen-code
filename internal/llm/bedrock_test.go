@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -129,9 +130,9 @@ func TestBedrockClient_PromptCachingUsesCachePoint(t *testing.T) {
 		}}, nil
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{
-		{Role: RoleSystem, Content: "system prompt"},
-		{Role: RoleUser, Content: "hi"},
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleSystem, Content: "system prompt"},
+		{Role: core.RoleUser, Content: "hi"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -185,10 +186,10 @@ func TestBedrockClient_OneShotSkipsPromptCaching(t *testing.T) {
 		}}, nil
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{
-		{Role: RoleSystem, Content: "system prompt"},
-		{Role: RoleUser, Content: "hi"},
-	}, nil, StreamOptions{OneShot: true})
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleSystem, Content: "system prompt"},
+		{Role: core.RoleUser, Content: "hi"},
+	}, nil, core.StreamOptions{OneShot: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -228,26 +229,26 @@ func TestBedrockClient_StreamChat_TextReasoningUsage(t *testing.T) {
 		}}, nil
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var reasoning string
 	var text string
-	var usage *TokenUsage
+	var usage *core.TokenUsage
 	var done bool
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeReasoningChunk:
+		case core.StreamEventTypeReasoningChunk:
 			reasoning += event.Content
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			text += event.Content
-		case StreamEventTypeUsage:
+		case core.StreamEventTypeUsage:
 			usage = event.Usage
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			done = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -307,12 +308,12 @@ func TestBedrockClient_StreamChat_LogsPromptCacheHits(t *testing.T) {
 		}}, nil
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for event := range eventCh {
-		if event.Type == StreamEventTypeError {
+		if event.Type == core.StreamEventTypeError {
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -354,7 +355,7 @@ func TestBedrockClient_StreamChat_ToolLoop(t *testing.T) {
 		}}, nil
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, registry)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -365,21 +366,21 @@ func TestBedrockClient_StreamChat_ToolLoop(t *testing.T) {
 	var done bool
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeToolStart:
+		case core.StreamEventTypeToolStart:
 			toolStart = true
 			if event.ToolCall.Name != "success_tool" {
 				t.Fatalf("expected success_tool start, got %q", event.ToolCall.Name)
 			}
-		case StreamEventTypeToolEnd:
+		case core.StreamEventTypeToolEnd:
 			toolEnd = true
 			if event.ToolCall.Error != "" {
 				t.Fatalf("unexpected tool error: %s", event.ToolCall.Error)
 			}
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			finalText += event.Content
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			done = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -446,13 +447,13 @@ func TestBedrockClient_StreamError(t *testing.T) {
 		return &mockBedrockStream{err: errors.New("boom")}, nil
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	var gotErr error
 	for event := range eventCh {
-		if event.Type == StreamEventTypeError {
+		if event.Type == core.StreamEventTypeError {
 			gotErr = event.Error
 		}
 	}
@@ -554,7 +555,7 @@ func TestBedrockClient_CustomHeaders(t *testing.T) {
 		return out.GetStream(), nil
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -1,12 +1,12 @@
 package repl
 
 import (
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/mochow13/keen-code/internal/llm"
 )
 
 func TestStreamRenderPlainAssistantAndReasoningBranches(t *testing.T) {
@@ -65,7 +65,7 @@ func TestRenderViewAndTranscriptHandleStandaloneToolEnd(t *testing.T) {
 	handler.lastWidth = 40
 	handler.showThinking = true
 	handler.segments = []streamSegment{
-		{kind: segmentToolEnd, toolCall: &llm.ToolCall{Name: "read_file", Output: map[string]any{"total_lines": 2}}},
+		{kind: segmentToolEnd, toolCall: &core.ToolCall{Name: "read_file", Output: map[string]any{"total_lines": 2}}},
 		{kind: segmentAssistant, content: "done"},
 		{kind: segmentReasoning, content: "thought"},
 	}
@@ -83,8 +83,8 @@ func TestRenderViewAndTranscriptHandleStandaloneToolEnd(t *testing.T) {
 func TestRenderFoldsOnlyConsecutiveReadsOfSameFile(t *testing.T) {
 	read := func(path string, lines, bytes int) []streamSegment {
 		return []streamSegment{
-			{kind: segmentToolStart, toolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": path}}},
-			{kind: segmentToolEnd, toolCall: &llm.ToolCall{Name: "read_file", Output: map[string]any{"lines_read": lines, "bytes_read": bytes}}},
+			{kind: segmentToolStart, toolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": path}}},
+			{kind: segmentToolEnd, toolCall: &core.ToolCall{Name: "read_file", Output: map[string]any{"lines_read": lines, "bytes_read": bytes}}},
 		}
 	}
 
@@ -112,11 +112,11 @@ func TestRenderFoldsOnlyConsecutiveReadsOfSameFile(t *testing.T) {
 
 func TestConsecutiveReadCallsRequireSuccessfulAdjacentPairs(t *testing.T) {
 	segments := []streamSegment{
-		{kind: segmentToolStart, toolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "same.go"}}},
-		{kind: segmentToolEnd, toolCall: &llm.ToolCall{Name: "read_file"}},
+		{kind: segmentToolStart, toolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "same.go"}}},
+		{kind: segmentToolEnd, toolCall: &core.ToolCall{Name: "read_file"}},
 		{kind: segmentAssistant, content: "between"},
-		{kind: segmentToolStart, toolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "same.go"}}},
-		{kind: segmentToolEnd, toolCall: &llm.ToolCall{Name: "read_file", Error: "failed"}},
+		{kind: segmentToolStart, toolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "same.go"}}},
+		{kind: segmentToolEnd, toolCall: &core.ToolCall{Name: "read_file", Error: "failed"}},
 	}
 
 	calls, endIndex := consecutiveReadCalls(segments, 0)

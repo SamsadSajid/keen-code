@@ -1,13 +1,13 @@
 package repl
 
 import (
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
 	repltheme "github.com/mochow13/keen-code/internal/cli/repl/theme"
-	"github.com/mochow13/keen-code/internal/llm"
 )
 
 const (
@@ -24,7 +24,7 @@ type contextStatus struct {
 	TotalOutputTokens int
 }
 
-func (s *contextStatus) AddUsage(usage *llm.TokenUsage) {
+func (s *contextStatus) AddUsage(usage *core.TokenUsage) {
 	if usage == nil {
 		return
 	}
