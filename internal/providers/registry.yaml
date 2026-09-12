@@ -176,11 +176,11 @@ providers:
       - id: deepseek-v4-flash
         name: DeepSeek V4 Flash
         context_window: 1000000
-        thinking_efforts: ["disabled", "high", "max"]
+        thinking_efforts: ["low", "high", "max"]
       - id: deepseek-v4-pro
         name: DeepSeek V4 Pro
         context_window: 1000000
-        thinking_efforts: ["disabled", "high", "max"]
+        thinking_efforts: ["low", "high", "max"]
 
   - id: minimax
     name: MiniMax
@@ -282,14 +282,18 @@ providers:
       - id: minimax-m2.7
         name: MiniMax M2.7
         context_window: 204800
+      - id: deepseek-v4.1-flash
+        name: DeepSeek V4.1 Flash
+        context_window: 1000000
+        thinking_efforts: ["low", "high", "max"]
       - id: deepseek-v4-pro
         name: DeepSeek V4 Pro
         context_window: 1000000
-        thinking_efforts: ["high", "max"]
+        thinking_efforts: ["low", "high", "max"]
       - id: deepseek-v4-flash
         name: DeepSeek V4 Flash
         context_window: 1000000
-        thinking_efforts: ["high", "max"]
+        thinking_efforts: ["low", "high", "max"]
       - id: hy4-preview
         name: Hy4 preview
         context_window: 1024000

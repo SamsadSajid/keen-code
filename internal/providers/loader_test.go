@@ -153,7 +153,7 @@ func TestModel_ThinkingEffortsLoadFromYAML(t *testing.T) {
 	if !deepseek.SupportsThinkingEffort() {
 		t.Error("expected deepseek-v4-pro to support thinking effort")
 	}
-	expectedDeepSeek := []string{"disabled", "high", "max"}
+	expectedDeepSeek := []string{"low", "high", "max"}
 	if !slices.Equal(deepseek.ThinkingEfforts, expectedDeepSeek) {
 		t.Fatalf("expected deepseek-v4-pro efforts %v, got %v", expectedDeepSeek, deepseek.ThinkingEfforts)
 	}
@@ -180,8 +180,8 @@ func TestModel_ThinkingEffortsLoadFromYAML(t *testing.T) {
 	if !ok {
 		t.Fatal("expected to find opencode-go provider")
 	}
-	if len(opencode.Models) != 27 {
-		t.Fatalf("expected 27 opencode-go models, got %d", len(opencode.Models))
+	if len(opencode.Models) != 28 {
+		t.Fatalf("expected 28 opencode-go models, got %d", len(opencode.Models))
 	}
 
 	qwen, ok := reg.GetModel("opencode-go", "qwen3.7-plus")
