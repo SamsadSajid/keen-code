@@ -16,6 +16,12 @@ import (
 	"github.com/aws/smithy-go/auth/bearer"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
+	"github.com/mochow13/keen-code/internal/llm/compaction"
+	"github.com/mochow13/keen-code/internal/llm/contextreduce"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/history"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
+	"github.com/mochow13/keen-code/internal/llm/retry"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -64,7 +70,7 @@ type bedrockContentBlockState struct {
 	inputBuffer string
 }
 
-func NewBedrockClient(cfg *ClientConfig) (*BedrockClient, error) {
+func NewBedrockClient(cfg *providerconfig.ClientConfig) (*BedrockClient, error) {
 	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("load AWS config: %w", err)
@@ -91,7 +97,7 @@ func NewBedrockClient(cfg *ClientConfig) (*BedrockClient, error) {
 	c := &BedrockClient{
 		client:                  client,
 		model:                   cfg.Model,
-		maxRetries:              retryCount(cfg.MaxRetries),
+		maxRetries:              retry.Count(cfg.MaxRetries),
 		contextWindowTokenCount: cfg.ContextWindowTokens,
 		thinkingEffort:          cfg.ThinkingEffort,
 		headers:                 cfg.Headers,
@@ -106,23 +112,23 @@ func NewBedrockClient(cfg *ClientConfig) (*BedrockClient, error) {
 	return c, nil
 }
 
-func toBedrockMessages(messages []Message) ([]brtypes.SystemContentBlock, []brtypes.Message) {
+func toBedrockMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []brtypes.Message) {
 	var system []brtypes.SystemContentBlock
 	var result []brtypes.Message
 
 	for messageIndex, m := range messages {
-		content := FormatMessageForProvider(m)
+		content := history.FormatMessage(m)
 		switch m.Role {
-		case RoleSystem:
+		case core.RoleSystem:
 			if content != "" {
 				system = append(system, &brtypes.SystemContentBlockMemberText{Value: content})
 			}
-		case RoleUser:
+		case core.RoleUser:
 			if content != "" {
 				result = append(result, bedrockTextMessage(brtypes.ConversationRoleUser, content))
 			}
-		case RoleAssistant:
-			for _, step := range historicalMessageSteps(messageIndex, m) {
+		case core.RoleAssistant:
+			for _, step := range history.MessageSteps(messageIndex, m) {
 				blocks := make([]brtypes.ContentBlock, 0, len(step.Activities)+1)
 				if step.Text != "" {
 					blocks = append(blocks, &brtypes.ContentBlockMemberText{Value: step.Text})
@@ -131,7 +137,7 @@ func toBedrockMessages(messages []Message) ([]brtypes.SystemContentBlock, []brty
 					blocks = append(blocks, &brtypes.ContentBlockMemberToolUse{Value: brtypes.ToolUseBlock{
 						ToolUseId: aws.String(invocation.ID),
 						Name:      aws.String(invocation.Activity.Tool),
-						Input:     document.NewLazyDocument(historicalToolInput(invocation.Activity)),
+						Input:     document.NewLazyDocument(history.ToolInput(invocation.Activity)),
 					}})
 				}
 				if len(blocks) > 0 {
@@ -147,7 +153,7 @@ func toBedrockMessages(messages []Message) ([]brtypes.SystemContentBlock, []brty
 						resultBlocks = append(resultBlocks, &brtypes.ContentBlockMemberToolResult{Value: brtypes.ToolResultBlock{
 							ToolUseId: aws.String(invocation.ID),
 							Content: []brtypes.ToolResultContentBlock{
-								&brtypes.ToolResultContentBlockMemberText{Value: historicalToolResult(invocation.Activity)},
+								&brtypes.ToolResultContentBlockMemberText{Value: history.ToolResult(invocation.Activity)},
 							},
 							Status: status,
 						}})
@@ -250,11 +256,11 @@ func toBedrockTools(registry *tools.Registry) *brtypes.ToolConfiguration {
 
 func (c *BedrockClient) StreamChat(
 	ctx context.Context,
-	messages []Message,
+	messages []core.Message,
 	toolRegistry *tools.Registry,
-	opts ...StreamOptions,
-) (<-chan StreamEvent, error) {
-	eventCh := make(chan StreamEvent)
+	opts ...core.StreamOptions,
+) (<-chan core.StreamEvent, error) {
+	eventCh := make(chan core.StreamEvent)
 	streamOpts := streamOptions(opts)
 
 	go func() {
@@ -268,7 +274,7 @@ func (c *BedrockClient) StreamChat(
 		}
 		turnStartLen := len(msgParams)
 		toolConfig := toBedrockTools(toolRegistry)
-		compactionHistory := CloneMessages(messages)
+		compactionHistory := core.CloneMessages(messages)
 		autoCompactOff := false
 		forcedRecoveryUsed := false
 		hasNewToolTurns := false
@@ -334,11 +340,11 @@ func (c *BedrockClient) StreamChat(
 					"total_tokens", usage.TotalTokens,
 					"cached_tokens", usage.CachedTokens,
 				)
-				eventCh <- StreamEvent{Type: StreamEventTypeUsage, Usage: usage}
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeUsage, Usage: usage}
 			}
 
 			if len(toolUses) == 0 {
-				eventCh <- StreamEvent{Type: StreamEventTypeDone}
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
 
@@ -348,10 +354,10 @@ func (c *BedrockClient) StreamChat(
 			})
 			toolResults, activities := c.executeTools(ctx, toolUses, toolRegistry, eventCh)
 			msgParams = append(msgParams, brtypes.Message{Role: brtypes.ConversationRoleUser, Content: toolResults})
-			compactionHistory = append(compactionHistory, Message{
-				Role:       RoleAssistant,
+			compactionHistory = append(compactionHistory, core.Message{
+				Role:       core.RoleAssistant,
 				Content:    bedrockAssistantText(assistantBlocks),
-				TurnMemory: &TurnMemory{ToolActivity: activities},
+				TurnMemory: &core.TurnMemory{ToolActivity: activities},
 			})
 			hasNewToolTurns = true
 			autoCompactOff = false
@@ -365,19 +371,19 @@ func (c *BedrockClient) StreamChat(
 
 func (c *BedrockClient) proactivelyCompactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	msgParams *[]brtypes.Message,
 	injectedPending *[]brtypes.Message,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || !hasNewToolTurns || autoCompactOff || len(*injectedPending) > 0 ||
-		!shouldAutoCompact(
-			estimateBedrockMessagesTokenCount(*msgParams),
-			contextInputBudget(c.contextWindowTokenCount),
+		!core.ShouldAutoCompact(
+			contextreduce.EstimateBedrock(*msgParams),
+			core.ContextInputBudget(c.contextWindowTokenCount),
 		) {
 		return nil
 	}
@@ -386,48 +392,48 @@ func (c *BedrockClient) proactivelyCompactHistory(
 
 func (c *BedrockClient) reduceContextOrCompact(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	msgParams *[]brtypes.Message,
 	injectedPending *[]brtypes.Message,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	forcedRecoveryUsed bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) ([]brtypes.Message, bool, error) {
-	reducedMessages, reduction := reduceBedrockContextForRequest(c.contextWindowTokenCount, *msgParams)
+	reducedMessages, reduction := contextreduce.ReduceBedrock(c.contextWindowTokenCount, *msgParams)
 	if reduction.FitsBudget {
 		return reducedMessages, false, nil
 	}
 
 	slog.Debug("Bedrock context still exceeds budget after reduction", "inputTokenCount", reduction.ReducedTokenCount, "removedToolResultCount", reduction.RemovedToolResults)
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || forcedRecoveryUsed || len(*injectedPending) > 0 {
-		return nil, false, fmt.Errorf("%w: %s", ErrContextWindowExceeded, contextWindowExceededError)
+		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
 	if err := c.compactHistory(ctx, compactionHistory, msgParams, injectedPending, turnStartLen, streamOpts.SessionID, eventCh); err != nil {
-		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", ErrContextWindowExceeded, err)
+		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
 }
 
 func (c *BedrockClient) compactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	msgParams *[]brtypes.Message,
 	injectedPending *[]brtypes.Message,
 	turnStartLen *int,
 	sessionID string,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	compactionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	eventCh <- StreamEvent{Type: StreamEventTypeAutoCompactionStarted, AutoCompaction: &AutoCompactionEvent{Cancel: cancel}}
+	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionStarted, AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel}}
 	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, sessionID)
 	if err != nil {
-		eventType := StreamEventTypeAutoCompactionFailed
-		if isAutoCompactionCancellation(err) {
-			eventType = StreamEventTypeAutoCompactionCancelled
+		eventType := core.StreamEventTypeAutoCompactionFailed
+		if compaction.IsCancellation(err) {
+			eventType = core.StreamEventTypeAutoCompactionCancelled
 		}
-		eventCh <- StreamEvent{Type: eventType, AutoCompaction: &AutoCompactionEvent{Error: err, Usage: usage}}
+		eventCh <- core.StreamEvent{Type: eventType, AutoCompaction: &core.AutoCompactionEvent{Error: err, Usage: usage}}
 		return err
 	}
 
@@ -436,7 +442,7 @@ func (c *BedrockClient) compactHistory(
 	*injectedPending = nil
 	*turnStartLen = len(*msgParams)
 	c.pendingState = nil
-	eventCh <- StreamEvent{Type: StreamEventTypeAutoCompactionApplied, AutoCompaction: &AutoCompactionEvent{Replacement: replacement, Usage: usage}}
+	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionApplied, AutoCompaction: &core.AutoCompactionEvent{Replacement: replacement, Usage: usage}}
 	return nil
 }
 
@@ -463,39 +469,29 @@ func cloneBedrockToolConfig(toolConfig *brtypes.ToolConfiguration) *brtypes.Tool
 	return cloned
 }
 
-func (c *BedrockClient) collectTurnWithRetry(
-	ctx context.Context,
-	params *bedrockruntime.ConverseStreamInput,
-	eventCh chan<- StreamEvent,
-) ([]brtypes.ContentBlock, []toolUseEntry, *TokenUsage, error) {
-	maxRetries := retryCount(c.maxRetries)
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		assistantBlocks, toolUses, usage, err := c.collectTurn(ctx, params, eventCh)
-		if err == nil {
-			return assistantBlocks, toolUses, usage, nil
-		}
-		if !isRetryableError(err) || attempt == maxRetries {
-			return nil, nil, nil, err
-		}
-
-		backoff := time.Duration(attempt) * time.Second
-		slog.Debug("Bedrock stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", backoff, "error", err)
-		eventCh <- StreamEvent{Type: StreamEventTypeRetry, Error: err, Attempt: attempt}
-
-		select {
-		case <-ctx.Done():
-			return nil, nil, nil, ctx.Err()
-		case <-time.After(backoff):
-		}
+func (c *BedrockClient) collectTurnWithRetry(ctx context.Context, params *bedrockruntime.ConverseStreamInput, eventCh chan<- core.StreamEvent) ([]brtypes.ContentBlock, []toolUseEntry, *core.TokenUsage, error) {
+	var blocks []brtypes.ContentBlock
+	var uses []toolUseEntry
+	var usage *core.TokenUsage
+	err := retry.Run(ctx, c.maxRetries, func(attempt, maxRetries int, err error) {
+		slog.Debug("Bedrock stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", time.Duration(attempt)*time.Second, "error", err)
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeRetry, Error: err, Attempt: attempt}
+	}, func() error {
+		var err error
+		blocks, uses, usage, err = c.collectTurn(ctx, params, eventCh)
+		return err
+	})
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	return nil, nil, nil, nil
+	return blocks, uses, usage, nil
 }
 
 func (c *BedrockClient) collectTurn(
 	ctx context.Context,
 	params *bedrockruntime.ConverseStreamInput,
-	eventCh chan<- StreamEvent,
-) ([]brtypes.ContentBlock, []toolUseEntry, *TokenUsage, error) {
+	eventCh chan<- core.StreamEvent,
+) ([]brtypes.ContentBlock, []toolUseEntry, *core.TokenUsage, error) {
 	stream, err := c.streamImpl(ctx, params)
 	if err != nil {
 		return nil, nil, nil, err
@@ -505,7 +501,7 @@ func (c *BedrockClient) collectTurn(
 	blockStates := map[int32]*bedrockContentBlockState{}
 	var assistantBlocks []brtypes.ContentBlock
 	var toolUses []toolUseEntry
-	var usage *TokenUsage
+	var usage *core.TokenUsage
 	var cacheReadInputTokens int32
 
 	for ev := range stream.Events() {
@@ -535,13 +531,13 @@ func (c *BedrockClient) collectTurn(
 			case *brtypes.ContentBlockDeltaMemberText:
 				state.blockType = "text"
 				state.text += delta.Value
-				eventCh <- StreamEvent{Type: StreamEventTypeChunk, Content: delta.Value}
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeChunk, Content: delta.Value}
 			case *brtypes.ContentBlockDeltaMemberReasoningContent:
 				switch reasoning := delta.Value.(type) {
 				case *brtypes.ReasoningContentBlockDeltaMemberText:
 					state.blockType = "reasoning"
 					state.thinking += reasoning.Value
-					eventCh <- StreamEvent{Type: StreamEventTypeReasoningChunk, Content: reasoning.Value}
+					eventCh <- core.StreamEvent{Type: core.StreamEventTypeReasoningChunk, Content: reasoning.Value}
 				case *brtypes.ReasoningContentBlockDeltaMemberSignature:
 					state.blockType = "reasoning"
 					state.signature = reasoning.Value
@@ -639,7 +635,7 @@ func bedrockToolInput(raw string) map[string]any {
 	return input
 }
 
-func bedrockUsage(usage *brtypes.TokenUsage) *TokenUsage {
+func bedrockUsage(usage *brtypes.TokenUsage) *core.TokenUsage {
 	if usage == nil {
 		return nil
 	}
@@ -647,7 +643,7 @@ func bedrockUsage(usage *brtypes.TokenUsage) *TokenUsage {
 	outputTokens := int(aws.ToInt32(usage.OutputTokens))
 	cachedTokens := int(aws.ToInt32(usage.CacheReadInputTokens) + aws.ToInt32(usage.CacheWriteInputTokens))
 	totalInputTokens := inputTokens + cachedTokens
-	return &TokenUsage{
+	return &core.TokenUsage{
 		InputTokens:  totalInputTokens,
 		OutputTokens: outputTokens,
 		TotalTokens:  totalInputTokens + outputTokens,
@@ -691,17 +687,17 @@ func (c *BedrockClient) savePendingIfAccumulated(msgParams []brtypes.Message, tu
 	c.pendingState = append(c.pendingState, newDelta...)
 }
 
-func (c *BedrockClient) emitTerminalEvent(eventCh chan<- StreamEvent, msgParams []brtypes.Message, turnStartLen int, injectedPending []brtypes.Message, err error) {
+func (c *BedrockClient) emitTerminalEvent(eventCh chan<- core.StreamEvent, msgParams []brtypes.Message, turnStartLen int, injectedPending []brtypes.Message, err error) {
 	if len(injectedPending) > 0 || len(msgParams) > turnStartLen {
-		eventCh <- StreamEvent{Type: StreamEventTypeIncomplete, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeIncomplete, Error: err}
 	} else if err != nil {
-		eventCh <- StreamEvent{Type: StreamEventTypeError, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: err}
 	} else {
-		eventCh <- StreamEvent{Type: StreamEventTypeDone}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 	}
 }
 
-func (c *BedrockClient) exitIncomplete(eventCh chan<- StreamEvent, msgParams []brtypes.Message, turnStartLen int, injectedPending []brtypes.Message, err error, oneShot bool) {
+func (c *BedrockClient) exitIncomplete(eventCh chan<- core.StreamEvent, msgParams []brtypes.Message, turnStartLen int, injectedPending []brtypes.Message, err error, oneShot bool) {
 	if !oneShot {
 		c.savePendingIfAccumulated(msgParams, turnStartLen, injectedPending)
 	}
@@ -712,59 +708,32 @@ func (c *BedrockClient) executeTools(
 	ctx context.Context,
 	toolUses []toolUseEntry,
 	registry *tools.Registry,
-	eventCh chan<- StreamEvent,
-) ([]brtypes.ContentBlock, []HistoricalToolActivity) {
+	eventCh chan<- core.StreamEvent,
+) ([]brtypes.ContentBlock, []core.HistoricalToolActivity) {
 	resultBlocks := make([]brtypes.ContentBlock, 0, len(toolUses))
-	activities := make([]HistoricalToolActivity, 0, len(toolUses))
+	activities := make([]core.HistoricalToolActivity, 0, len(toolUses))
 
 	for _, tu := range toolUses {
-		start := time.Now()
-
 		slog.Debug("Tool request", "tool", tu.name, "input", tu.input)
-
-		rawOutput, output, execErr, toolStarted := executeValidatedTool(ctx, registry, tu.name, tu.input, eventCh)
-
-		duration := time.Since(start)
-		toolCall := &ToolCall{
-			Name:     tu.name,
-			Input:    tu.input,
-			Output:   rawOutput,
-			Duration: duration,
-		}
-
+		execution := executeTool(ctx, registry, tu.name, tu.input, eventCh)
 		status := brtypes.ToolResultStatusSuccess
-		content := []brtypes.ToolResultContentBlock{}
-		if execErr != nil {
-			toolCall.Error = execErr.Error()
+		output := execution.LLMOutput
+		if execution.Err != nil {
 			status = brtypes.ToolResultStatusError
-			slog.Debug("Tool response", "tool", tu.name, "error", execErr.Error(), "duration", duration)
-			if toolStarted {
-				eventCh <- StreamEvent{
-					Type:     StreamEventTypeToolEnd,
-					ToolCall: toolCall,
-				}
-			}
-			content = append(content, &brtypes.ToolResultContentBlockMemberJson{Value: document.NewLazyDocument(map[string]any{"error": execErr.Error()})})
-		} else {
-			slog.Debug("Tool response", "tool", tu.name, "duration", duration)
-			eventCh <- StreamEvent{
-				Type:     StreamEventTypeToolEnd,
-				ToolCall: toolCall,
-			}
-			if output == nil {
-				output = map[string]any{}
-			}
-			content = append(content, &brtypes.ToolResultContentBlockMemberJson{Value: document.NewLazyDocument(output)})
+			output = map[string]any{"error": execution.Err.Error()}
+		} else if output == nil {
+			output = map[string]any{}
 		}
-
 		resultBlocks = append(resultBlocks, &brtypes.ContentBlockMemberToolResult{
 			Value: brtypes.ToolResultBlock{
 				ToolUseId: aws.String(tu.id),
-				Content:   content,
-				Status:    status,
+				Content: []brtypes.ToolResultContentBlock{
+					&brtypes.ToolResultContentBlockMemberJson{Value: document.NewLazyDocument(output)},
+				},
+				Status: status,
 			},
 		})
-		activities = append(activities, historicalToolActivity(tu.name, tu.input, rawOutput, output, execErr))
+		activities = append(activities, execution.Activity)
 	}
 
 	return resultBlocks, activities

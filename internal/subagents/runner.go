@@ -3,6 +3,7 @@ package subagents
 import (
 	"context"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"maps"
 	"strings"
 	"sync/atomic"
@@ -83,7 +84,7 @@ func (r *Runner) run(ctx context.Context, agent, activityAgent, task string) (Re
 	childCtx, cancel := context.WithTimeout(ctx, profileTimeout(profile))
 	defer cancel()
 
-	events, err := client.StreamChat(childCtx, r.childMessages(profile, task), registry, llm.StreamOptions{OneShot: true})
+	events, err := client.StreamChat(childCtx, r.childMessages(profile, task), registry, core.StreamOptions{OneShot: true})
 	if err != nil {
 		return failedResult(profile.Name, "", err.Error(), err)
 	}

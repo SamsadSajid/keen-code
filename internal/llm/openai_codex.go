@@ -16,6 +16,12 @@ import (
 
 	"github.com/mochow13/keen-code/internal/auth"
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/compaction"
+	"github.com/mochow13/keen-code/internal/llm/contextreduce"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/history"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
+	"github.com/mochow13/keen-code/internal/llm/retry"
 	"github.com/mochow13/keen-code/internal/tools"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -39,15 +45,15 @@ type OpenAICodexClient struct {
 	headers                 map[string]string
 }
 
-func NewOpenAICodexClient(cfg *ClientConfig) (*OpenAICodexClient, error) {
-	if cfg.Provider != Provider(config.ProviderOpenAICodex) {
+func NewOpenAICodexClient(cfg *providerconfig.ClientConfig) (*OpenAICodexClient, error) {
+	if cfg.Provider != providerconfig.Provider(config.ProviderOpenAICodex) {
 		return nil, fmt.Errorf("unsupported Codex OAuth provider: %s. %s", cfg.Provider, config.ConfigFixHint)
 	}
 
 	c := &OpenAICodexClient{
 		model:                   cfg.Model,
 		thinkingEffort:          cfg.ThinkingEffort,
-		maxRetries:              retryCount(cfg.MaxRetries),
+		maxRetries:              retry.Count(cfg.MaxRetries),
 		client:                  openai.NewClient(option.WithBaseURL(openAICodexBaseURL), option.WithHTTPClient(newCodexHTTPClient())),
 		contextWindowTokenCount: cfg.ContextWindowTokens,
 		authManager:             auth.NewOAuthManager(nil),
@@ -73,8 +79,8 @@ func newCodexHTTPClient() *http.Client {
 	return &http.Client{Transport: transport}
 }
 
-func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []Message, toolRegistry *tools.Registry, opts ...StreamOptions) (<-chan StreamEvent, error) {
-	eventCh := make(chan StreamEvent)
+func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
+	eventCh := make(chan core.StreamEvent)
 
 	go func() {
 		defer close(eventCh)
@@ -83,7 +89,7 @@ func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []Message, 
 		streamOpts := streamOptions(opts)
 		oneShot := streamOpts.OneShot
 		sessionID := streamOpts.SessionID
-		compactionHistory := CloneMessages(messages)
+		compactionHistory := core.CloneMessages(messages)
 		autoCompactOff := false
 		forcedRecoveryUsed := false
 		hasNewToolTurns := false
@@ -160,9 +166,9 @@ func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []Message, 
 					"reasoning_tokens", completed.Usage.OutputTokensDetails.ReasoningTokens,
 					"cached_tokens", completed.Usage.InputTokensDetails.CachedTokens,
 				)
-				eventCh <- StreamEvent{
-					Type: StreamEventTypeUsage,
-					Usage: &TokenUsage{
+				eventCh <- core.StreamEvent{
+					Type: core.StreamEventTypeUsage,
+					Usage: &core.TokenUsage{
 						InputTokens:     int(completed.Usage.InputTokens),
 						OutputTokens:    int(completed.Usage.OutputTokens),
 						TotalTokens:     int(completed.Usage.TotalTokens),
@@ -174,7 +180,7 @@ func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []Message, 
 			emitMissingFinalContent(eventCh, completed.OutputText(), streamedContent)
 
 			if len(toolCalls) == 0 {
-				eventCh <- StreamEvent{Type: StreamEventTypeDone}
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
 
@@ -182,10 +188,10 @@ func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []Message, 
 			toolResults, activities := c.executeTools(ctx, toolCalls, toolRegistry, eventCh)
 			input = append(input, toolResults...)
 			content := completed.OutputText()
-			compactionHistory = append(compactionHistory, Message{
-				Role:       RoleAssistant,
+			compactionHistory = append(compactionHistory, core.Message{
+				Role:       core.RoleAssistant,
 				Content:    content,
-				TurnMemory: &TurnMemory{ToolActivity: activities},
+				TurnMemory: &core.TurnMemory{ToolActivity: activities},
 			})
 			hasNewToolTurns = true
 			autoCompactOff = false
@@ -203,18 +209,18 @@ func (c *OpenAICodexClient) Reset() {
 
 func (c *OpenAICodexClient) proactivelyCompactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	instructions *string,
 	input *[]responses.ResponseInputItemUnionParam,
 	injectedPending *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || !hasNewToolTurns || autoCompactOff || len(*injectedPending) > 0 ||
-		!shouldAutoCompact(codexHistoryTokenCount(*compactionHistory), contextInputBudget(c.contextWindowTokenCount)) {
+		!core.ShouldAutoCompact(codexHistoryTokenCount(*compactionHistory), core.ContextInputBudget(c.contextWindowTokenCount)) {
 		return nil
 	}
 
@@ -223,50 +229,50 @@ func (c *OpenAICodexClient) proactivelyCompactHistory(
 
 func (c *OpenAICodexClient) reduceContextOrCompact(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	instructions *string,
 	input *[]responses.ResponseInputItemUnionParam,
 	injectedPending *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	forcedRecoveryUsed bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) ([]responses.ResponseInputItemUnionParam, bool, error) {
-	reducedInput, reduction := reduceResponsesContextForRequest(c.contextWindowTokenCount, *input)
+	reducedInput, reduction := contextreduce.ReduceResponses(c.contextWindowTokenCount, *input)
 	if reduction.FitsBudget {
 		return reducedInput, false, nil
 	}
 
 	slog.Debug("OpenAI Codex context still exceeds budget after reduction", "inputTokenCount", reduction.ReducedTokenCount, "removedToolResultCount", reduction.RemovedToolResults)
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || forcedRecoveryUsed || len(*injectedPending) > 0 {
-		return nil, false, fmt.Errorf("%w: %s", ErrContextWindowExceeded, contextWindowExceededError)
+		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
 	if err := c.compactHistory(ctx, compactionHistory, instructions, input, injectedPending, turnStartLen, streamOpts.SessionID, eventCh); err != nil {
-		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", ErrContextWindowExceeded, err)
+		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
 }
 
 func (c *OpenAICodexClient) compactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	instructions *string,
 	input *[]responses.ResponseInputItemUnionParam,
 	injectedPending *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
 	sessionID string,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	compactionCtx, cancel := context.WithCancel(ctx)
-	eventCh <- StreamEvent{Type: StreamEventTypeAutoCompactionStarted, AutoCompaction: &AutoCompactionEvent{Cancel: cancel}}
+	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionStarted, AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel}}
 	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, sessionID)
 	cancel()
 	if err != nil {
-		eventType := StreamEventTypeAutoCompactionFailed
-		if isAutoCompactionCancellation(err) {
-			eventType = StreamEventTypeAutoCompactionCancelled
+		eventType := core.StreamEventTypeAutoCompactionFailed
+		if compaction.IsCancellation(err) {
+			eventType = core.StreamEventTypeAutoCompactionCancelled
 		}
-		eventCh <- StreamEvent{Type: eventType, AutoCompaction: &AutoCompactionEvent{Error: err, Usage: usage}}
+		eventCh <- core.StreamEvent{Type: eventType, AutoCompaction: &core.AutoCompactionEvent{Error: err, Usage: usage}}
 		return err
 	}
 
@@ -275,24 +281,24 @@ func (c *OpenAICodexClient) compactHistory(
 	*injectedPending = nil
 	*turnStartLen = len(*input)
 	c.pendingState = nil
-	eventCh <- StreamEvent{Type: StreamEventTypeAutoCompactionApplied, AutoCompaction: &AutoCompactionEvent{Replacement: replacement, Usage: usage}}
+	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionApplied, AutoCompaction: &core.AutoCompactionEvent{Replacement: replacement, Usage: usage}}
 	return nil
 }
 
-func codexHistoryTokenCount(history []Message) int {
+func codexHistoryTokenCount(messages []core.Message) int {
 	tokenCount := 0
-	for _, message := range history {
-		tokenCount += estimateContextTokenCount(FormatMessageForProvider(message))
+	for _, message := range messages {
+		tokenCount += core.EstimateContextTokenCount(history.FormatMessage(message))
 	}
 	return tokenCount
 }
 
-func codexInstructionsAndInput(messages []Message) (string, []responses.ResponseInputItemUnionParam) {
+func codexInstructionsAndInput(messages []core.Message) (string, []responses.ResponseInputItemUnionParam) {
 	instructions := make([]string, 0, 1)
-	inputMessages := make([]Message, 0, len(messages))
+	inputMessages := make([]core.Message, 0, len(messages))
 	for _, m := range messages {
-		if m.Role == RoleSystem {
-			content := strings.TrimSpace(FormatMessageForProvider(m))
+		if m.Role == core.RoleSystem {
+			content := strings.TrimSpace(history.FormatMessage(m))
 			if content != "" {
 				instructions = append(instructions, content)
 			}
@@ -326,7 +332,7 @@ func (c *OpenAICodexClient) injectPendingState(input []responses.ResponseInputIt
 	return input, injectedPending
 }
 
-func (c *OpenAICodexClient) exitIncomplete(eventCh chan<- StreamEvent, input []responses.ResponseInputItemUnionParam, turnStartLen int, injectedPending []responses.ResponseInputItemUnionParam, err error, oneShot bool) {
+func (c *OpenAICodexClient) exitIncomplete(eventCh chan<- core.StreamEvent, input []responses.ResponseInputItemUnionParam, turnStartLen int, injectedPending []responses.ResponseInputItemUnionParam, err error, oneShot bool) {
 	if !oneShot {
 		c.savePendingIfAccumulated(input, turnStartLen, injectedPending)
 	}
@@ -348,48 +354,38 @@ func (c *OpenAICodexClient) savePendingIfAccumulated(input []responses.ResponseI
 	c.pendingState = append(c.pendingState, newDelta...)
 }
 
-func (c *OpenAICodexClient) emitTerminalEvent(eventCh chan<- StreamEvent, input []responses.ResponseInputItemUnionParam, turnStartLen int, injectedPending []responses.ResponseInputItemUnionParam, err error) {
+func (c *OpenAICodexClient) emitTerminalEvent(eventCh chan<- core.StreamEvent, input []responses.ResponseInputItemUnionParam, turnStartLen int, injectedPending []responses.ResponseInputItemUnionParam, err error) {
 	if len(injectedPending) > 0 || len(input) > turnStartLen {
-		eventCh <- StreamEvent{Type: StreamEventTypeIncomplete, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeIncomplete, Error: err}
 	} else if err != nil {
-		eventCh <- StreamEvent{Type: StreamEventTypeError, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: err}
 	} else {
-		eventCh <- StreamEvent{Type: StreamEventTypeDone}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 	}
 }
 
-func (c *OpenAICodexClient) collectTurnWithRetry(
-	ctx context.Context,
-	params responses.ResponseNewParams,
-	eventCh chan<- StreamEvent,
-) (*responses.Response, string, []responses.ResponseFunctionToolCall, error) {
-	maxRetries := retryCount(c.maxRetries)
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		completed, streamedContent, toolCalls, err := c.collectTurn(ctx, params, eventCh)
-		if err == nil {
-			return completed, streamedContent, toolCalls, nil
-		}
-		if !isRetryableError(err) || attempt == maxRetries {
-			return nil, "", nil, err
-		}
-
-		backoff := time.Duration(attempt) * time.Second
-		slog.Debug("LLM stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", backoff, "error", err)
-		eventCh <- StreamEvent{Type: StreamEventTypeRetry, Error: err, Attempt: attempt}
-
-		select {
-		case <-ctx.Done():
-			return nil, "", nil, ctx.Err()
-		case <-time.After(backoff):
-		}
+func (c *OpenAICodexClient) collectTurnWithRetry(ctx context.Context, params responses.ResponseNewParams, eventCh chan<- core.StreamEvent) (*responses.Response, string, []responses.ResponseFunctionToolCall, error) {
+	var completed *responses.Response
+	var content string
+	var calls []responses.ResponseFunctionToolCall
+	err := retry.Run(ctx, c.maxRetries, func(attempt, maxRetries int, err error) {
+		slog.Debug("LLM stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", time.Duration(attempt)*time.Second, "error", err)
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeRetry, Error: err, Attempt: attempt}
+	}, func() error {
+		var err error
+		completed, content, calls, err = c.collectTurn(ctx, params, eventCh)
+		return err
+	})
+	if err != nil {
+		return nil, "", nil, err
 	}
-	return nil, "", nil, nil
+	return completed, content, calls, nil
 }
 
 func (c *OpenAICodexClient) collectTurn(
 	ctx context.Context,
 	params responses.ResponseNewParams,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) (*responses.Response, string, []responses.ResponseFunctionToolCall, error) {
 	opts, err := c.requestOptions(ctx)
 	if err != nil {
@@ -430,8 +426,8 @@ func (c *OpenAICodexClient) collectTurn(
 				reasoning = ev.Text
 			}
 			if reasoning != "" {
-				eventCh <- StreamEvent{
-					Type:    StreamEventTypeReasoningChunk,
+				eventCh <- core.StreamEvent{
+					Type:    core.StreamEventTypeReasoningChunk,
 					Content: reasoning,
 				}
 			}
@@ -531,7 +527,7 @@ func codexTextProgressKey(ev responses.ResponseStreamEventUnion) string {
 	return ev.ItemID + ":" + fmt.Sprint(ev.ContentIndex)
 }
 
-func emitCodexText(eventCh chan<- StreamEvent, streamedContent *strings.Builder, progress map[string]int, key string, text string) {
+func emitCodexText(eventCh chan<- core.StreamEvent, streamedContent *strings.Builder, progress map[string]int, key string, text string) {
 	if text == "" {
 		return
 	}
@@ -540,7 +536,7 @@ func emitCodexText(eventCh chan<- StreamEvent, streamedContent *strings.Builder,
 	emitChunk(eventCh, text)
 }
 
-func emitCodexTextDone(eventCh chan<- StreamEvent, streamedContent *strings.Builder, progress map[string]int, key string, text string) {
+func emitCodexTextDone(eventCh chan<- core.StreamEvent, streamedContent *strings.Builder, progress map[string]int, key string, text string) {
 	if text == "" {
 		return
 	}
@@ -551,7 +547,7 @@ func emitCodexTextDone(eventCh chan<- StreamEvent, streamedContent *strings.Buil
 	emitCodexText(eventCh, streamedContent, progress, key, text[already:])
 }
 
-func emitCodexOutputItemDone(eventCh chan<- StreamEvent, streamedContent *strings.Builder, progress map[string]int, item responses.ResponseOutputItemUnion) {
+func emitCodexOutputItemDone(eventCh chan<- core.StreamEvent, streamedContent *strings.Builder, progress map[string]int, item responses.ResponseOutputItemUnion) {
 	if item.Type != "message" {
 		return
 	}
@@ -581,13 +577,12 @@ func (c *OpenAICodexClient) executeTools(
 	ctx context.Context,
 	toolCalls []responses.ResponseFunctionToolCall,
 	registry *tools.Registry,
-	eventCh chan<- StreamEvent,
-) ([]responses.ResponseInputItemUnionParam, []HistoricalToolActivity) {
+	eventCh chan<- core.StreamEvent,
+) ([]responses.ResponseInputItemUnionParam, []core.HistoricalToolActivity) {
 	toolMessages := make([]responses.ResponseInputItemUnionParam, 0, len(toolCalls))
-	activities := make([]HistoricalToolActivity, 0, len(toolCalls))
+	activities := make([]core.HistoricalToolActivity, 0, len(toolCalls))
 
 	for _, tc := range toolCalls {
-		start := time.Now()
 		input := map[string]any{}
 		if tc.Arguments != "" {
 			if err := json.Unmarshal([]byte(tc.Arguments), &input); err != nil {
@@ -595,39 +590,13 @@ func (c *OpenAICodexClient) executeTools(
 			}
 		}
 		slog.Debug("Tool request", "tool", tc.Name, "input", input)
-
-		rawOutput, output, execErr, toolStarted := executeValidatedTool(ctx, registry, tc.Name, input, eventCh)
-
-		duration := time.Since(start)
-		toolCall := &ToolCall{
-			Name:     tc.Name,
-			Input:    input,
-			Output:   rawOutput,
-			Duration: duration,
+		execution := executeTool(ctx, registry, tc.Name, input, eventCh)
+		toolOutput := history.SerializeJSON(execution.LLMOutput)
+		if execution.Err != nil {
+			toolOutput = history.SerializeJSON(map[string]any{"error": execution.Err.Error()})
 		}
-
-		var toolOutput string
-		if execErr != nil {
-			toolCall.Error = execErr.Error()
-			slog.Debug("Tool response", "tool", tc.Name, "error", execErr.Error(), "duration", duration)
-			if toolStarted {
-				eventCh <- StreamEvent{
-					Type:     StreamEventTypeToolEnd,
-					ToolCall: toolCall,
-				}
-			}
-			toolOutput = serializeJSON(map[string]any{"error": execErr.Error()})
-		} else {
-			slog.Debug("Tool response", "tool", tc.Name, "duration", duration)
-			eventCh <- StreamEvent{
-				Type:     StreamEventTypeToolEnd,
-				ToolCall: toolCall,
-			}
-			toolOutput = serializeJSON(output)
-		}
-
 		toolMessages = append(toolMessages, responses.ResponseInputItemParamOfFunctionCallOutput(tc.CallID, toolOutput))
-		activities = append(activities, historicalToolActivity(tc.Name, input, rawOutput, output, execErr))
+		activities = append(activities, execution.Activity)
 	}
 
 	return toolMessages, activities

@@ -1,9 +1,8 @@
 package session
 
 import (
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"testing"
-
-	"github.com/mochow13/keen-code/internal/llm"
 )
 
 func TestBuildConversation_AppendsAssistantTurnMessages(t *testing.T) {
@@ -16,8 +15,8 @@ func TestBuildConversation_AppendsAssistantTurnMessages(t *testing.T) {
 			Kind: KindAssistantTurn,
 			AssistantTurn: &AssistantTurnPayload{
 				Message: "assistant",
-				TurnMemory: &llm.TurnMemory{
-					ToolActivity: []llm.HistoricalToolActivity{{Tool: "ask_user", Input: map[string]any{"questions": []any{"Database?"}}, Status: "success", RetainedOutput: map[string]any{"answers": []any{"PostgreSQL"}, "cancelled": false}}},
+				TurnMemory: &core.TurnMemory{
+					ToolActivity: []core.HistoricalToolActivity{{Tool: "ask_user", Input: map[string]any{"questions": []any{"Database?"}}, Status: "success", RetainedOutput: map[string]any{"answers": []any{"PostgreSQL"}, "cancelled": false}}},
 				},
 				Interrupted: true,
 				Error:       "ignored for conversation projection",
@@ -29,10 +28,10 @@ func TestBuildConversation_AppendsAssistantTurnMessages(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(got))
 	}
-	if got[0].Role != llm.RoleUser || got[0].Content != "user" {
+	if got[0].Role != core.RoleUser || got[0].Content != "user" {
 		t.Fatalf("unexpected user message: %#v", got[0])
 	}
-	if got[1].Role != llm.RoleAssistant || got[1].Content != "assistant" {
+	if got[1].Role != core.RoleAssistant || got[1].Content != "assistant" {
 		t.Fatalf("unexpected assistant message: %#v", got[1])
 	}
 	if got[1].TurnMemory == nil || len(got[1].TurnMemory.ToolActivity) != 1 {
@@ -64,7 +63,7 @@ func TestBuildConversation_PreservesToolOnlyAssistantTurn(t *testing.T) {
 	events := []Event{{
 		Kind: KindAssistantTurn,
 		AssistantTurn: &AssistantTurnPayload{
-			TurnMemory: &llm.TurnMemory{ToolActivity: []llm.HistoricalToolActivity{{
+			TurnMemory: &core.TurnMemory{ToolActivity: []core.HistoricalToolActivity{{
 				Tool:   "read_file",
 				Status: "success",
 			}}},
@@ -78,8 +77,8 @@ func TestBuildConversation_PreservesToolOnlyAssistantTurn(t *testing.T) {
 }
 
 func TestBuildConversation_CompactionCloneIsIndependent(t *testing.T) {
-	compacted := []llm.Message{
-		{Role: llm.RoleUser, Content: "summary"},
+	compacted := []core.Message{
+		{Role: core.RoleUser, Content: "summary"},
 	}
 	events := []Event{
 		{

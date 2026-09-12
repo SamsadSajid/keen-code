@@ -3,20 +3,19 @@ package subagents
 import (
 	"context"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"maps"
 	"strings"
-
-	"github.com/mochow13/keen-code/internal/llm"
 )
 
 type ToolActivity struct {
 	RunID  string
 	CallID string
 	Agent  string
-	Event  llm.StreamEvent
+	Event  core.StreamEvent
 }
 
-func collectResult(ctx context.Context, events <-chan llm.StreamEvent, agent, runID string, activity chan<- ToolActivity) (string, error) {
+func collectResult(ctx context.Context, events <-chan core.StreamEvent, agent, runID string, activity chan<- ToolActivity) (string, error) {
 	var sb strings.Builder
 	var callCounter int
 	pending := make([]string, 0)
@@ -27,14 +26,14 @@ func collectResult(ctx context.Context, events <-chan llm.StreamEvent, agent, ru
 				return strings.TrimSpace(sb.String()), nil
 			}
 			switch event.Type {
-			case llm.StreamEventTypeChunk:
+			case core.StreamEventTypeChunk:
 				sb.WriteString(event.Content)
-			case llm.StreamEventTypeToolStart:
+			case core.StreamEventTypeToolStart:
 				callCounter++
 				callID := fmt.Sprintf("tool-%d", callCounter)
 				pending = append(pending, callID)
 				forwardActivity(ctx, activity, sanitizeActivity(agent, runID, callID, event))
-			case llm.StreamEventTypeToolEnd:
+			case core.StreamEventTypeToolEnd:
 				callID := ""
 				if len(pending) > 0 {
 					callID = pending[0]
@@ -44,9 +43,9 @@ func collectResult(ctx context.Context, events <-chan llm.StreamEvent, agent, ru
 					callID = fmt.Sprintf("tool-%d", callCounter)
 				}
 				forwardActivity(ctx, activity, sanitizeActivity(agent, runID, callID, event))
-			case llm.StreamEventTypeDone:
+			case core.StreamEventTypeDone:
 				return strings.TrimSpace(sb.String()), nil
-			case llm.StreamEventTypeError, llm.StreamEventTypeIncomplete:
+			case core.StreamEventTypeError, core.StreamEventTypeIncomplete:
 				if event.Error != nil {
 					return strings.TrimSpace(sb.String()), event.Error
 				}
@@ -58,12 +57,12 @@ func collectResult(ctx context.Context, events <-chan llm.StreamEvent, agent, ru
 	}
 }
 
-func sanitizeActivity(agent, runID, callID string, event llm.StreamEvent) ToolActivity {
-	var call *llm.ToolCall
+func sanitizeActivity(agent, runID, callID string, event core.StreamEvent) ToolActivity {
+	var call *core.ToolCall
 	if event.ToolCall != nil {
 		cloned := *event.ToolCall
 		cloned.Output = nil
-		if event.Type == llm.StreamEventTypeToolEnd {
+		if event.Type == core.StreamEventTypeToolEnd {
 			cloned.Input = nil
 		} else if cloned.Input != nil {
 			cloned.Input = cloneInput(cloned.Input)
@@ -74,7 +73,7 @@ func sanitizeActivity(agent, runID, callID string, event llm.StreamEvent) ToolAc
 		RunID:  runID,
 		CallID: callID,
 		Agent:  agent,
-		Event:  llm.StreamEvent{Type: event.Type, ToolCall: call},
+		Event:  core.StreamEvent{Type: event.Type, ToolCall: call},
 	}
 }
 

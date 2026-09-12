@@ -2,12 +2,12 @@ package repl
 
 import (
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	reploutput "github.com/mochow13/keen-code/internal/cli/repl/output"
 	repltheme "github.com/mochow13/keen-code/internal/cli/repl/theme"
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -192,7 +192,7 @@ func (sh *StreamHandler) renderTranscriptLines() []string {
 	return lines
 }
 
-func consecutiveReadCalls(segments []streamSegment, startIndex int) ([]*llm.ToolCall, int) {
+func consecutiveReadCalls(segments []streamSegment, startIndex int) ([]*core.ToolCall, int) {
 	if startIndex >= len(segments) || segments[startIndex].kind != segmentToolStart {
 		return nil, startIndex
 	}
@@ -202,7 +202,7 @@ func consecutiveReadCalls(segments []streamSegment, startIndex int) ([]*llm.Tool
 	}
 	path, _ := startCall.Input["path"].(string)
 
-	var endCalls []*llm.ToolCall
+	var endCalls []*core.ToolCall
 	endIndex := startIndex
 	for i := startIndex; i+1 < len(segments); i += 2 {
 		start := segments[i]
@@ -225,7 +225,7 @@ func (sh *StreamHandler) shouldHideToolStart(index int) bool {
 	return index+1 < len(sh.segments) && sh.segments[index+1].kind == segmentToolEnd && isHiddenToolFailure(sh.segments[index+1].toolCall)
 }
 
-func isHiddenToolFailure(toolCall *llm.ToolCall) bool {
+func isHiddenToolFailure(toolCall *core.ToolCall) bool {
 	if toolCall == nil {
 		return false
 	}

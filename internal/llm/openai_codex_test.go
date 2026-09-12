@@ -15,6 +15,7 @@ import (
 
 	"github.com/mochow13/keen-code/internal/auth"
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/tools"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -92,12 +93,12 @@ func TestOpenAICodexClientRequestTargetsCodexEndpointAndOAuthHeaders(t *testing.
 		return &sdkResponseStream{stream: client.client.Responses.NewStreaming(ctx, params, opts...)}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	for ev := range ch {
-		if ev.Type == StreamEventTypeError {
+		if ev.Type == core.StreamEventTypeError {
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -147,12 +148,12 @@ func TestOpenAICodexClientRequestCustomHeaders(t *testing.T) {
 		return &sdkResponseStream{stream: client.client.Responses.NewStreaming(ctx, params, opts...)}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	for ev := range ch {
-		if ev.Type == StreamEventTypeError {
+		if ev.Type == core.StreamEventTypeError {
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -176,15 +177,15 @@ func TestOpenAICodexClientSetsInstructionsStoreAndReasoning(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleSystem, Content: "system prompt"},
-		{Role: RoleUser, Content: "hi"},
+	ch, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleSystem, Content: "system prompt"},
+		{Role: core.RoleUser, Content: "hi"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	for ev := range ch {
-		if ev.Type == StreamEventTypeError {
+		if ev.Type == core.StreamEventTypeError {
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -221,13 +222,13 @@ func TestOpenAICodexClientOutputTextDoneEmitsFinalText(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	var streamed strings.Builder
 	for ev := range ch {
-		if ev.Type == StreamEventTypeChunk {
+		if ev.Type == core.StreamEventTypeChunk {
 			streamed.WriteString(ev.Content)
 		}
 	}
@@ -248,13 +249,13 @@ func TestOpenAICodexClientOutputTextDoneDoesNotDuplicateDeltas(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	var streamed strings.Builder
 	for ev := range ch {
-		if ev.Type == StreamEventTypeChunk {
+		if ev.Type == core.StreamEventTypeChunk {
 			streamed.WriteString(ev.Content)
 		}
 	}
@@ -274,13 +275,13 @@ func TestOpenAICodexClientOutputItemDoneEmitsMessageText(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "review this"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "review this"}}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	var streamed strings.Builder
 	for ev := range ch {
-		if ev.Type == StreamEventTypeChunk {
+		if ev.Type == core.StreamEventTypeChunk {
 			streamed.WriteString(ev.Content)
 		}
 	}
@@ -301,13 +302,13 @@ func TestOpenAICodexClientOutputItemDoneDoesNotDuplicateDeltas(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "review this"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "review this"}}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	var streamed strings.Builder
 	for ev := range ch {
-		if ev.Type == StreamEventTypeChunk {
+		if ev.Type == core.StreamEventTypeChunk {
 			streamed.WriteString(ev.Content)
 		}
 	}
@@ -342,7 +343,7 @@ func TestOpenAICodexClientTerminalResponseEvents(t *testing.T) {
 				return &fakeResponseStream{events: []responses.ResponseStreamEventUnion{mustResponseEvent(t, tt.event)}}
 			}
 
-			ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hello"}}, nil)
+			ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hello"}}, nil)
 			if err != nil {
 				t.Fatalf("StreamChat() failed: %v", err)
 			}
@@ -350,9 +351,9 @@ func TestOpenAICodexClientTerminalResponseEvents(t *testing.T) {
 			var terminalErr error
 			for ev := range ch {
 				switch ev.Type {
-				case StreamEventTypeError:
+				case core.StreamEventTypeError:
 					terminalErr = ev.Error
-				case StreamEventTypeDone:
+				case core.StreamEventTypeDone:
 					t.Fatal("expected error event, got done")
 				}
 			}
@@ -396,7 +397,7 @@ func TestOpenAICodexClientToolCallsReplayItemsWithoutPreviousResponseID(t *testi
 		t.Fatalf("register tool: %v", err)
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "read go.mod"}}, registry)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "read go.mod"}}, registry)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
@@ -406,13 +407,13 @@ func TestOpenAICodexClientToolCallsReplayItemsWithoutPreviousResponseID(t *testi
 	var toolEndCount int
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			streamed.WriteString(ev.Content)
-		case StreamEventTypeToolStart:
+		case core.StreamEventTypeToolStart:
 			toolStartCount++
-		case StreamEventTypeToolEnd:
+		case core.StreamEventTypeToolEnd:
 			toolEndCount++
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -477,7 +478,7 @@ func TestOpenAICodexClient_PendingState_ErrorMidLoop(t *testing.T) {
 		t.Fatalf("register tool: %v", err)
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "read go.mod"}}, registry)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "read go.mod"}}, registry)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
@@ -486,10 +487,10 @@ func TestOpenAICodexClient_PendingState_ErrorMidLoop(t *testing.T) {
 	var incompleteErr error
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			hasIncomplete = true
 			incompleteErr = ev.Error
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("expected incomplete, got error: %v", ev.Error)
 		}
 	}
@@ -549,7 +550,7 @@ func TestOpenAICodexClient_PendingState_InjectedOnNextCall(t *testing.T) {
 		t.Fatalf("register tool: %v", err)
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "read go.mod"}}, registry)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "read go.mod"}}, registry)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
@@ -561,9 +562,9 @@ func TestOpenAICodexClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	}
 	savedLen := len(client.pendingState)
 
-	ch, err = client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err = client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
@@ -573,11 +574,11 @@ func TestOpenAICodexClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	var streamed strings.Builder
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			hasDone = true
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			streamed.WriteString(ev.Content)
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -624,9 +625,9 @@ func TestOpenAICodexClient_PendingState_PreservedWhenRecoveryFailsBeforeProgress
 		return &fakeResponseStream{err: &openai.Error{StatusCode: http.StatusInternalServerError}}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
@@ -635,9 +636,9 @@ func TestOpenAICodexClient_PendingState_PreservedWhenRecoveryFailsBeforeProgress
 	var hasIncomplete bool
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			hasIncomplete = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("expected incomplete, got error: %v", ev.Error)
 		}
 	}
@@ -662,7 +663,7 @@ func TestOpenAICodexClient_PendingState_NoAccumulation_EmitsError(t *testing.T) 
 		return &fakeResponseStream{err: &openai.Error{StatusCode: http.StatusUnauthorized}}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "test"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "test"}}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
@@ -670,9 +671,9 @@ func TestOpenAICodexClient_PendingState_NoAccumulation_EmitsError(t *testing.T) 
 	var hasError bool
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			hasError = true
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			t.Fatal("expected error, not incomplete")
 		}
 	}
@@ -707,14 +708,14 @@ func TestOpenAICodexClient_PendingState_EmptyResponseMidLoop(t *testing.T) {
 		t.Fatalf("register tool: %v", err)
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "read go.mod"}}, registry)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "read go.mod"}}, registry)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 
 	var hasIncomplete bool
 	for ev := range ch {
-		if ev.Type == StreamEventTypeIncomplete {
+		if ev.Type == core.StreamEventTypeIncomplete {
 			hasIncomplete = true
 		}
 	}
@@ -742,9 +743,9 @@ func TestOpenAICodexClient_PendingState_ClearedOnSuccess(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "original"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "original"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
@@ -752,7 +753,7 @@ func TestOpenAICodexClient_PendingState_ClearedOnSuccess(t *testing.T) {
 
 	var hasDone bool
 	for ev := range ch {
-		if ev.Type == StreamEventTypeDone {
+		if ev.Type == core.StreamEventTypeDone {
 			hasDone = true
 		}
 	}
@@ -827,12 +828,12 @@ func TestOpenAICodexClient_PromptCacheKey_SetFromSessionID(t *testing.T) {
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, StreamOptions{SessionID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"})
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil, core.StreamOptions{SessionID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"})
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	for ev := range ch {
-		if ev.Type == StreamEventTypeError {
+		if ev.Type == core.StreamEventTypeError {
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -859,12 +860,12 @@ func TestOpenAICodexClient_PromptCacheKey_OmittedWithoutSessionID(t *testing.T) 
 		}
 	}
 
-	ch, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	ch, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("StreamChat() failed: %v", err)
 	}
 	for ev := range ch {
-		if ev.Type == StreamEventTypeError {
+		if ev.Type == core.StreamEventTypeError {
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}

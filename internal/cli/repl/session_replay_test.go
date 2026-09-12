@@ -1,10 +1,10 @@
 package repl
 
 import (
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
 	"testing"
 
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/session"
 	"github.com/mochow13/keen-code/internal/tools"
 )
@@ -63,8 +63,8 @@ func TestSessionReplay_CompactionRendersTranscript(t *testing.T) {
 				{Kind: session.TranscriptItemReasoning, Content: "condensing"},
 				{Kind: session.TranscriptItemText, Content: "summary"},
 			},
-			Messages: []llm.Message{
-				{Role: llm.RoleUser, Content: "summary"},
+			Messages: []core.Message{
+				{Role: core.RoleUser, Content: "summary"},
 			},
 		},
 	})

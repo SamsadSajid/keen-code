@@ -2,6 +2,7 @@ package repl
 
 import (
 	"errors"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
 	"testing"
 	"time"
@@ -133,8 +134,8 @@ func TestWaitForAsyncEventRoutesReadyInputs(t *testing.T) {
 		t.Fatal("waitForAsyncEvent returned a command without an LLM channel")
 	}
 
-	llmCh := make(chan llm.StreamEvent, 1)
-	llmCh <- llm.StreamEvent{Type: llm.StreamEventTypeChunk, Content: "chunk"}
+	llmCh := make(chan core.StreamEvent, 1)
+	llmCh <- core.StreamEvent{Type: core.StreamEventTypeChunk, Content: "chunk"}
 	if msg, ok := waitForAsyncEvent(llmCh, nil, nil, nil, nil)().(mainStreamMsg); !ok || msg.event.Content != "chunk" {
 		t.Fatalf("unexpected LLM message %#v", msg)
 	}
@@ -142,26 +143,26 @@ func TestWaitForAsyncEventRoutesReadyInputs(t *testing.T) {
 	permissionCh := make(chan *replpermissions.Request, 1)
 	request := &replpermissions.Request{ToolName: "read_file"}
 	permissionCh <- request
-	if msg, ok := waitForAsyncEvent(make(chan llm.StreamEvent), permissionCh, nil, nil, nil)().(permissionReadyMsg); !ok || msg.req != request {
+	if msg, ok := waitForAsyncEvent(make(chan core.StreamEvent), permissionCh, nil, nil, nil)().(permissionReadyMsg); !ok || msg.req != request {
 		t.Fatalf("unexpected permission message %#v", msg)
 	}
 
 	diffCh := make(chan repltooling.DiffRequest, 1)
 	diffCh <- repltooling.DiffRequest{}
-	if _, ok := waitForAsyncEvent(make(chan llm.StreamEvent), nil, diffCh, nil, nil)().(diffReadyMsg); !ok {
+	if _, ok := waitForAsyncEvent(make(chan core.StreamEvent), nil, diffCh, nil, nil)().(diffReadyMsg); !ok {
 		t.Fatal("expected diffReadyMsg")
 	}
 
 	subagentCh := make(chan subagents.ToolActivity, 1)
 	subagentCh <- subagents.ToolActivity{}
-	if _, ok := waitForAsyncEvent(make(chan llm.StreamEvent), nil, nil, subagentCh, nil)().(subagentActivityMsg); !ok {
+	if _, ok := waitForAsyncEvent(make(chan core.StreamEvent), nil, nil, subagentCh, nil)().(subagentActivityMsg); !ok {
 		t.Fatal("expected subagentActivityMsg")
 	}
 
 	askUserCh := make(chan *replaskuser.Request, 1)
 	askRequest := &replaskuser.Request{}
 	askUserCh <- askRequest
-	if msg, ok := waitForAsyncEvent(make(chan llm.StreamEvent), nil, nil, nil, askUserCh)().(askUserReadyMsg); !ok || msg.req != askRequest {
+	if msg, ok := waitForAsyncEvent(make(chan core.StreamEvent), nil, nil, nil, askUserCh)().(askUserReadyMsg); !ok || msg.req != askRequest {
 		t.Fatalf("unexpected ask_user message %#v", msg)
 	}
 }
@@ -211,26 +212,26 @@ func TestWaitForAdversaryEvent(t *testing.T) {
 	}
 	tests := []struct {
 		name  string
-		event llm.StreamEvent
+		event core.StreamEvent
 		check func(tea.Msg) bool
 	}{
-		{name: "chunk", event: llm.StreamEvent{Type: llm.StreamEventTypeChunk, Content: "text"}, check: func(msg tea.Msg) bool { v, ok := msg.(adversaryChunkMsg); return ok && string(v) == "text" }},
-		{name: "tool start", event: llm.StreamEvent{Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "read_file"}}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryToolStartMsg); return ok }},
-		{name: "tool end", event: llm.StreamEvent{Type: llm.StreamEventTypeToolEnd, ToolCall: &llm.ToolCall{Name: "read_file"}}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryToolEndMsg); return ok }},
-		{name: "done", event: llm.StreamEvent{Type: llm.StreamEventTypeDone}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryDoneMsg); return ok }},
-		{name: "error", event: llm.StreamEvent{Type: llm.StreamEventTypeError, Error: errors.New("failed")}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryErrorMsg); return ok }},
-		{name: "incomplete", event: llm.StreamEvent{Type: llm.StreamEventTypeIncomplete, Error: errors.New("incomplete")}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryErrorMsg); return ok }},
+		{name: "chunk", event: core.StreamEvent{Type: core.StreamEventTypeChunk, Content: "text"}, check: func(msg tea.Msg) bool { v, ok := msg.(adversaryChunkMsg); return ok && string(v) == "text" }},
+		{name: "tool start", event: core.StreamEvent{Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "read_file"}}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryToolStartMsg); return ok }},
+		{name: "tool end", event: core.StreamEvent{Type: core.StreamEventTypeToolEnd, ToolCall: &core.ToolCall{Name: "read_file"}}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryToolEndMsg); return ok }},
+		{name: "done", event: core.StreamEvent{Type: core.StreamEventTypeDone}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryDoneMsg); return ok }},
+		{name: "error", event: core.StreamEvent{Type: core.StreamEventTypeError, Error: errors.New("failed")}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryErrorMsg); return ok }},
+		{name: "incomplete", event: core.StreamEvent{Type: core.StreamEventTypeIncomplete, Error: errors.New("incomplete")}, check: func(msg tea.Msg) bool { _, ok := msg.(adversaryErrorMsg); return ok }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ch := make(chan llm.StreamEvent, 1)
+			ch := make(chan core.StreamEvent, 1)
 			ch <- tt.event
 			if msg := waitForAdversaryEvent(ch)(); !tt.check(msg) {
 				t.Fatalf("unexpected message %#v", msg)
 			}
 		})
 	}
-	closed := make(chan llm.StreamEvent)
+	closed := make(chan core.StreamEvent)
 	close(closed)
 	if _, ok := waitForAdversaryEvent(closed)().(adversaryDoneMsg); !ok {
 		t.Fatal("closed channel did not produce adversaryDoneMsg")
@@ -242,22 +243,22 @@ func TestWaitForBtwEvent(t *testing.T) {
 		t.Fatal("waitForBtwEvent returned command for nil channel")
 	}
 	tests := []struct {
-		event llm.StreamEvent
+		event core.StreamEvent
 		check func(tea.Msg) bool
 	}{
-		{event: llm.StreamEvent{Type: llm.StreamEventTypeChunk, Content: "text"}, check: func(msg tea.Msg) bool { v, ok := msg.(btwChunkMsg); return ok && string(v) == "text" }},
-		{event: llm.StreamEvent{Type: llm.StreamEventTypeDone}, check: func(msg tea.Msg) bool { _, ok := msg.(btwDoneMsg); return ok }},
-		{event: llm.StreamEvent{Type: llm.StreamEventTypeError, Error: errors.New("failed")}, check: func(msg tea.Msg) bool { _, ok := msg.(btwErrorMsg); return ok }},
-		{event: llm.StreamEvent{Type: llm.StreamEventTypeIncomplete, Error: errors.New("incomplete")}, check: func(msg tea.Msg) bool { _, ok := msg.(btwErrorMsg); return ok }},
+		{event: core.StreamEvent{Type: core.StreamEventTypeChunk, Content: "text"}, check: func(msg tea.Msg) bool { v, ok := msg.(btwChunkMsg); return ok && string(v) == "text" }},
+		{event: core.StreamEvent{Type: core.StreamEventTypeDone}, check: func(msg tea.Msg) bool { _, ok := msg.(btwDoneMsg); return ok }},
+		{event: core.StreamEvent{Type: core.StreamEventTypeError, Error: errors.New("failed")}, check: func(msg tea.Msg) bool { _, ok := msg.(btwErrorMsg); return ok }},
+		{event: core.StreamEvent{Type: core.StreamEventTypeIncomplete, Error: errors.New("incomplete")}, check: func(msg tea.Msg) bool { _, ok := msg.(btwErrorMsg); return ok }},
 	}
 	for _, tt := range tests {
-		ch := make(chan llm.StreamEvent, 1)
+		ch := make(chan core.StreamEvent, 1)
 		ch <- tt.event
 		if msg := waitForBtwEvent(ch)(); !tt.check(msg) {
 			t.Fatalf("unexpected message %#v", msg)
 		}
 	}
-	closed := make(chan llm.StreamEvent)
+	closed := make(chan core.StreamEvent)
 	close(closed)
 	if _, ok := waitForBtwEvent(closed)().(btwDoneMsg); !ok {
 		t.Fatal("closed channel did not produce btwDoneMsg")

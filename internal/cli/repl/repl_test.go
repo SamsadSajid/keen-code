@@ -3,6 +3,7 @@ package repl
 import (
 	"context"
 	"errors"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,7 @@ func scrollViewportAwayFromBottom(t *testing.T, m *replModel) int {
 
 func TestUpdate_InlinePermission_AllowsToolStartEvent(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	sh.Start(eventCh, "Loading...")
 
 	req := &replpermissions.Request{
@@ -130,7 +131,7 @@ func TestUpdate_InlinePermission_AllowsToolStartEvent(t *testing.T) {
 		output:  reploutput.NewOutputBuilder(80, ""),
 	}
 
-	toolCall := &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "../foo.txt"}}
+	toolCall := &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "../foo.txt"}}
 	updatedModel, cmd := m.Update(llmToolStartMsg{toolCall: toolCall})
 
 	updated, ok := updatedModel.(*replModel)
@@ -274,7 +275,7 @@ func TestUpdateNormalMode_WindowResizeWhileModelSelectionActive(t *testing.T) {
 func TestUpdateViewportContent_UsesViewportWidthWhenModelStartsWithoutResize(t *testing.T) {
 	m := newTestModel()
 	m.width = 0
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	m.stream.handler.HandleReasoningChunk("thinking")
 
@@ -423,7 +424,7 @@ func TestUpdate_CleanupFailureShowsGenericMessage(t *testing.T) {
 
 func TestUpdate_RoutesToPermissionHandling(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	req := &replpermissions.Request{
@@ -460,7 +461,7 @@ func TestHandleLLMStreamMsg_UnknownMsg(t *testing.T) {
 
 func TestHandleLLMStreamMsg_RoutesChunk(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	m.loading.showSpinner = true
 
@@ -496,7 +497,7 @@ func TestHandleLLMStreamMsg_StreamRenderFlushesWithoutMainStream(t *testing.T) {
 
 func TestUpdateNormalMode_PermissionReadyRendersImmediately(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	m.loading.showSpinner = true
 
@@ -524,7 +525,7 @@ func TestUpdateNormalMode_PermissionReadyRendersImmediately(t *testing.T) {
 
 func TestUpdateNormalMode_PermissionReadyPreservesUserScroll(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	m.loading.showSpinner = true
 	offset := scrollViewportAwayFromBottom(t, &m)
@@ -547,7 +548,7 @@ func TestUpdateNormalMode_PermissionReadyPreservesUserScroll(t *testing.T) {
 
 func TestUpdateNormalMode_DiffReadyRendersImmediately(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	done := make(chan struct{})
@@ -575,7 +576,7 @@ func TestUpdateNormalMode_DiffReadyRendersImmediately(t *testing.T) {
 
 func TestUpdateNormalMode_DiffReadyPreservesUserScroll(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	offset := scrollViewportAwayFromBottom(t, &m)
 
@@ -639,8 +640,8 @@ func TestReplayLoadedSession_RebuildsOutputAndConversation(t *testing.T) {
 							Content: "summary",
 						},
 					},
-					Messages: []llm.Message{
-						{Role: llm.RoleUser, Content: "summary"},
+					Messages: []core.Message{
+						{Role: core.RoleUser, Content: "summary"},
 					},
 				},
 			},
@@ -853,7 +854,7 @@ func TestHandleCompactionDone_StopsCompactionAndRefreshesOutput(t *testing.T) {
 	m.loading.showSpinner = true
 	m.compaction.cancel = func() {}
 	m.contextStatus = contextStatus{KnownWindow: true, Percent: 10}
-	m.stream.handler.Start(make(chan llm.StreamEvent), "Compacting...")
+	m.stream.handler.Start(make(chan core.StreamEvent), "Compacting...")
 	m.stream.handler.HandleChunk("compacted summary")
 
 	newM, cmd := m.handleCompactionDone()
@@ -868,7 +869,7 @@ func TestHandleCompactionDone_StopsCompactionAndRefreshesOutput(t *testing.T) {
 		t.Fatalf("expected streamed compaction summary, got %q", newM.output.Join())
 	}
 	compacted := newM.appState.GetMessages()
-	if len(compacted) != 1 || compacted[0].Role != llm.RoleUser || compacted[0].Content != "compacted summary" {
+	if len(compacted) != 1 || compacted[0].Role != core.RoleUser || compacted[0].Content != "compacted summary" {
 		t.Fatalf("expected compacted state to keep summary as single user message, got %#v", compacted)
 	}
 	if cmd != nil {

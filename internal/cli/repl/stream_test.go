@@ -2,6 +2,7 @@ package repl
 
 import (
 	"errors"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
 	"testing"
 
@@ -9,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 	replpermissions "github.com/mochow13/keen-code/internal/cli/repl/permissions"
 	repltooling "github.com/mochow13/keen-code/internal/cli/repl/tooling"
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/subagents"
 	"github.com/mochow13/keen-code/internal/tools"
 )
@@ -17,15 +17,15 @@ import (
 func TestStreamHandlerHidesSubagentFileNotFoundFailure(t *testing.T) {
 	h := NewStreamHandler(nil)
 	h.workingDir = "/repo"
-	h.Start(make(chan llm.StreamEvent), "Working")
-	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-1", CallID: "tool-1", Agent: "worker", Event: llm.StreamEvent{
-		Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "missing.go"}},
+	h.Start(make(chan core.StreamEvent), "Working")
+	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-1", CallID: "tool-1", Agent: "worker", Event: core.StreamEvent{
+		Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "missing.go"}},
 	}})
 	if view := h.View(120); !strings.Contains(view, "missing.go") {
 		t.Fatalf("expected active tool call before its result, got %q", view)
 	}
-	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-1", CallID: "tool-1", Agent: "worker", Event: llm.StreamEvent{
-		Type: llm.StreamEventTypeToolEnd, ToolCall: &llm.ToolCall{Name: "read_file", Error: "not found: file missing.go"},
+	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-1", CallID: "tool-1", Agent: "worker", Event: core.StreamEvent{
+		Type: core.StreamEventTypeToolEnd, ToolCall: &core.ToolCall{Name: "read_file", Error: "not found: file missing.go"},
 	}})
 	if view := h.View(120); strings.Contains(view, "missing.go") || strings.Contains(view, "<worker>") {
 		t.Fatalf("expected completed file-not-found call to be hidden, got %q", view)
@@ -38,15 +38,15 @@ func TestStreamHandlerHidesSubagentFileNotFoundFailure(t *testing.T) {
 func TestStreamHandlerRendersInterleavedSubagentActivityWithoutResults(t *testing.T) {
 	h := NewStreamHandler(nil)
 	h.workingDir = "/repo"
-	h.Start(make(chan llm.StreamEvent), "Working")
-	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-1", CallID: "tool-1", Agent: "worker", Event: llm.StreamEvent{
-		Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "bash", Input: map[string]any{"command": "go test ./..."}},
+	h.Start(make(chan core.StreamEvent), "Working")
+	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-1", CallID: "tool-1", Agent: "worker", Event: core.StreamEvent{
+		Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "bash", Input: map[string]any{"command": "go test ./..."}},
 	}})
-	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-2", CallID: "tool-1", Agent: "reviewer", Event: llm.StreamEvent{
-		Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "README.md"}},
+	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-2", CallID: "tool-1", Agent: "reviewer", Event: core.StreamEvent{
+		Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "README.md"}},
 	}})
-	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-1", CallID: "tool-1", Agent: "worker", Event: llm.StreamEvent{
-		Type: llm.StreamEventTypeToolEnd, ToolCall: &llm.ToolCall{Name: "bash", Output: map[string]any{"stdout": "hidden-output"}},
+	h.HandleSubagentActivity(subagents.ToolActivity{RunID: "run-1", CallID: "tool-1", Agent: "worker", Event: core.StreamEvent{
+		Type: core.StreamEventTypeToolEnd, ToolCall: &core.ToolCall{Name: "bash", Output: map[string]any{"stdout": "hidden-output"}},
 	}})
 	view := h.View(120)
 	for _, want := range []string{"[worker]", "go test ./...", "[reviewer]", "README.md"} {
@@ -61,7 +61,7 @@ func TestStreamHandlerRendersInterleavedSubagentActivityWithoutResults(t *testin
 
 func TestStreamHandler_HandleChunk(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	sh.HandleChunk("Hello")
 	if sh.GetResponse() != "Hello" {
@@ -85,7 +85,7 @@ func TestStreamHandler_HandleChunk(t *testing.T) {
 
 func TestStreamHandler_HandleReasoningChunk_DoesNotAffectAssistantResponse(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	sh.HandleReasoningChunk("thinking ")
 	sh.HandleReasoningChunk("more")
@@ -107,7 +107,7 @@ func TestStreamHandler_HandleReasoningChunk_DoesNotAffectAssistantResponse(t *te
 
 func TestStreamHandler_HandleDone(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	sh.Start(eventCh, "Loading...")
 	sh.HandleChunk("Line 1\nLine 2")
 
@@ -134,7 +134,7 @@ func TestStreamHandler_HandleDone(t *testing.T) {
 
 func TestStreamHandler_HandleError(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	sh.Start(eventCh, "Loading...")
 	sh.HandleChunk("some content")
 
@@ -162,12 +162,12 @@ func TestStreamHandler_HandleError(t *testing.T) {
 
 func TestStreamHandler_RewindForRetry_PreservesSealedSegments(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	// Iteration 1: assistant text + a completed tool call.
 	sh.HandleChunk("Let me read the file. ")
-	sh.HandleToolStart(&llm.ToolCall{Name: "read_file"})
-	sh.HandleToolEnd(&llm.ToolCall{Name: "read_file", Duration: 5})
+	sh.HandleToolStart(&core.ToolCall{Name: "read_file"})
+	sh.HandleToolEnd(&core.ToolCall{Name: "read_file", Duration: 5})
 
 	// Iteration 2: in-flight reasoning + assistant chunks before a stream failure.
 	sh.HandleReasoningChunk("checking the contents")
@@ -199,7 +199,7 @@ func TestStreamHandler_RewindForRetry_PreservesSealedSegments(t *testing.T) {
 
 func TestStreamHandler_RewindForRetry_EmptyStream(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	sh.HandleChunk("partial")
 	sh.HandleReasoningChunk("hmm")
@@ -216,7 +216,7 @@ func TestStreamHandler_RewindForRetry_EmptyStream(t *testing.T) {
 
 func TestStreamHandler_RewindForRetry_PreservesResolvedPermissionAndDiff(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	sh.HandleChunk("I'll edit this. ")
 	sh.HandleDiff([]tools.EditDiffLine{{Kind: tools.DiffLineAdded, Content: "new line", NewLineNum: 1}})
@@ -244,11 +244,11 @@ func TestStreamHandler_RewindForRetry_PreservesResolvedPermissionAndDiff(t *test
 
 func TestStreamHandler_RewindForRetry_LeavesSealedTailUnchanged(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	sh.HandleChunk("Running tests. ")
 	sh.HandleBashStart("go test ./...", "run tests")
-	sh.HandleBashEnd(&llm.ToolCall{Output: map[string]any{"stdout": "ok"}})
+	sh.HandleBashEnd(&core.ToolCall{Output: map[string]any{"stdout": "ok"}})
 
 	sh.RewindForRetry()
 
@@ -265,13 +265,13 @@ func TestStreamHandler_RewindForRetry_LeavesSealedTailUnchanged(t *testing.T) {
 
 func TestStreamHandler_HandleDone_MixedSegmentsChronological(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	sh.Start(eventCh, "Loading...")
 
 	sh.HandleChunk("First chunk")
-	sh.HandleToolStart(&llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "go.mod"}})
+	sh.HandleToolStart(&core.ToolCall{Name: "read_file", Input: map[string]any{"path": "go.mod"}})
 	sh.HandleChunk(" Second chunk")
-	sh.HandleToolEnd(&llm.ToolCall{Name: "read_file", Duration: 5})
+	sh.HandleToolEnd(&core.ToolCall{Name: "read_file", Duration: 5})
 
 	lines, fullResponse := sh.HandleDone()
 
@@ -300,11 +300,11 @@ func TestStreamHandler_HandleDone_MixedSegmentsChronological(t *testing.T) {
 
 func TestStreamHandler_HandleDone_AdjacentToolStartEnd_CollapsedToOneLine(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	sh.Start(eventCh, "Loading...")
 
-	sh.HandleToolStart(&llm.ToolCall{Name: "glob", Input: map[string]any{"pattern": "**/*.go"}})
-	sh.HandleToolEnd(&llm.ToolCall{Name: "glob", Duration: 5})
+	sh.HandleToolStart(&core.ToolCall{Name: "glob", Input: map[string]any{"pattern": "**/*.go"}})
+	sh.HandleToolEnd(&core.ToolCall{Name: "glob", Duration: 5})
 
 	lines, _ := sh.HandleDone()
 
@@ -321,11 +321,11 @@ func TestStreamHandler_HandleDone_AdjacentToolStartEnd_CollapsedToOneLine(t *tes
 
 func TestStreamHandler_ReadFileNotFoundIsHidden(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	sh.HandleChunk("Checking the file. ")
-	sh.HandleToolStart(&llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "missing.go"}})
-	sh.HandleToolEnd(&llm.ToolCall{Name: "read_file", Error: `not found: file "missing.go" does not exist`})
+	sh.HandleToolStart(&core.ToolCall{Name: "read_file", Input: map[string]any{"path": "missing.go"}})
+	sh.HandleToolEnd(&core.ToolCall{Name: "read_file", Error: `not found: file "missing.go" does not exist`})
 	sh.HandleChunk("It is absent.")
 
 	view := sh.View(80)
@@ -387,11 +387,11 @@ func TestStreamHandler_HidesExpectedEditFileFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sh := NewStreamHandler(nil)
-			sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+			sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 			sh.HandleChunk("Trying an edit. ")
-			sh.HandleToolStart(&llm.ToolCall{Name: "edit_file", Input: map[string]any{"path": "output.go"}})
-			sh.HandleToolEnd(&llm.ToolCall{Name: "edit_file", Error: tt.err})
+			sh.HandleToolStart(&core.ToolCall{Name: "edit_file", Input: map[string]any{"path": "output.go"}})
+			sh.HandleToolEnd(&core.ToolCall{Name: "edit_file", Error: tt.err})
 			sh.HandleChunk("The edit did not apply.")
 
 			view := sh.View(80)
@@ -411,20 +411,20 @@ func TestStreamHandler_HidesExpectedEditFileFailures(t *testing.T) {
 
 func TestStreamHandler_DelegateTaskShowsBatchAndPartialFailure(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Brewing...")
+	sh.Start(make(<-chan core.StreamEvent), "Brewing...")
 	input := map[string]any{"tasks": []any{
 		map[string]any{"agent": "explorer", "task": "one"},
 		map[string]any{"agent": "explorer", "task": "two"},
 		map[string]any{"agent": "reviewer", "task": "three"},
 	}}
-	sh.HandleToolStart(&llm.ToolCall{Name: "delegate_task", Input: input})
+	sh.HandleToolStart(&core.ToolCall{Name: "delegate_task", Input: input})
 
 	view := sh.View(80)
 	if !strings.Contains(view, "3 tasks (explorer ×2, reviewer ×1)") {
 		t.Fatalf("expected running batch summary, got %q", view)
 	}
 
-	sh.HandleToolEnd(&llm.ToolCall{
+	sh.HandleToolEnd(&core.ToolCall{
 		Name:  "delegate_task",
 		Input: input,
 		Output: map[string]any{"results": []map[string]any{
@@ -440,8 +440,8 @@ func TestStreamHandler_DelegateTaskShowsBatchAndPartialFailure(t *testing.T) {
 
 func TestStreamHandler_CallMCPToolNeverShowsArguments(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Brewing...")
-	sh.HandleToolStart(&llm.ToolCall{Name: "call_mcp_tool", Input: map[string]any{
+	sh.Start(make(<-chan core.StreamEvent), "Brewing...")
+	sh.HandleToolStart(&core.ToolCall{Name: "call_mcp_tool", Input: map[string]any{
 		"server": "context7",
 		"tool":   "query-docs",
 		"arguments": map[string]any{
@@ -458,7 +458,7 @@ func TestStreamHandler_CallMCPToolNeverShowsArguments(t *testing.T) {
 		t.Fatalf("expected MCP arguments to be hidden, got %q", view)
 	}
 
-	sh.HandleToolEnd(&llm.ToolCall{Name: "call_mcp_tool", Input: map[string]any{
+	sh.HandleToolEnd(&core.ToolCall{Name: "call_mcp_tool", Input: map[string]any{
 		"server": "context7",
 		"tool":   "query-docs",
 		"arguments": map[string]any{
@@ -487,7 +487,7 @@ func TestStreamHandler_CallMCPToolNeverShowsArguments(t *testing.T) {
 
 func TestStreamHandler_View_NoSpinnerInView(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Brewing...")
+	sh.Start(make(<-chan core.StreamEvent), "Brewing...")
 
 	view := sh.View(80)
 
@@ -498,7 +498,7 @@ func TestStreamHandler_View_NoSpinnerInView(t *testing.T) {
 
 func TestStreamHandler_View_WithRunningBashShowsCommand(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Brewing...")
+	sh.Start(make(<-chan core.StreamEvent), "Brewing...")
 	sh.HandleBashStart("npm test", "running tests")
 
 	view := sh.View(80)
@@ -513,13 +513,13 @@ func TestStreamHandler_View_WithRunningBashShowsCommand(t *testing.T) {
 
 func TestStreamHandler_View_LongToolStatusWrapsWithinWidth(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Brewing...")
+	sh.Start(make(<-chan core.StreamEvent), "Brewing...")
 	longPattern := strings.Repeat("very-long-segment/", 8) + "*.go"
-	sh.HandleToolStart(&llm.ToolCall{Name: "grep", Input: map[string]any{
+	sh.HandleToolStart(&core.ToolCall{Name: "grep", Input: map[string]any{
 		"pattern": longPattern,
 		"path":    "internal/cli/repl",
 	}})
-	sh.HandleToolEnd(&llm.ToolCall{Name: "grep", Duration: 5})
+	sh.HandleToolEnd(&core.ToolCall{Name: "grep", Duration: 5})
 
 	width := 40
 	view := sh.View(width)
@@ -539,12 +539,12 @@ func TestStreamHandler_View_LongToolStatusWrapsWithinWidth(t *testing.T) {
 
 func TestStreamHandler_HandleDone_LongToolStatusWrapsToLastWidth(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Brewing...")
-	sh.HandleToolStart(&llm.ToolCall{Name: "grep", Input: map[string]any{
+	sh.Start(make(<-chan core.StreamEvent), "Brewing...")
+	sh.HandleToolStart(&core.ToolCall{Name: "grep", Input: map[string]any{
 		"pattern": strings.Repeat("long-pattern-", 12),
 		"path":    "internal/cli/repl",
 	}})
-	sh.HandleToolEnd(&llm.ToolCall{Name: "grep", Duration: 5})
+	sh.HandleToolEnd(&core.ToolCall{Name: "grep", Duration: 5})
 	sh.View(42)
 
 	lines, _ := sh.HandleDone()
@@ -560,7 +560,7 @@ func TestStreamHandler_HandleDone_LongToolStatusWrapsToLastWidth(t *testing.T) {
 
 func TestStreamHandler_View_BashUsesViewportWidthRules(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Brewing...")
+	sh.Start(make(<-chan core.StreamEvent), "Brewing...")
 	sh.HandleBashStart("npm test", "running tests")
 
 	wideView := sh.View(80)
@@ -607,7 +607,7 @@ func TestStreamHandler_View_BashUsesViewportWidthRules(t *testing.T) {
 
 func TestStreamHandler_View_WithContent(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 	sh.HandleChunk("Hello World")
 
 	view := sh.View(80)
@@ -619,7 +619,7 @@ func TestStreamHandler_View_WithContent(t *testing.T) {
 
 func TestStreamHandler_View_NoSpinnerNoContent(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	view := sh.View(80)
 
@@ -629,9 +629,9 @@ func TestStreamHandler_View_NoSpinnerNoContent(t *testing.T) {
 }
 
 func TestWaitForAsyncEvent_Chunk(t *testing.T) {
-	eventCh := make(chan llm.StreamEvent, 1)
-	eventCh <- llm.StreamEvent{
-		Type:    llm.StreamEventTypeChunk,
+	eventCh := make(chan core.StreamEvent, 1)
+	eventCh <- core.StreamEvent{
+		Type:    core.StreamEventTypeChunk,
 		Content: "chunk data",
 	}
 	close(eventCh)
@@ -652,15 +652,15 @@ func TestWaitForAsyncEvent_Chunk(t *testing.T) {
 	if streamMsg.closed {
 		t.Fatal("expected open stream event")
 	}
-	if streamMsg.event.Type != llm.StreamEventTypeChunk || streamMsg.event.Content != "chunk data" {
+	if streamMsg.event.Type != core.StreamEventTypeChunk || streamMsg.event.Content != "chunk data" {
 		t.Fatalf("unexpected stream event: %#v", streamMsg.event)
 	}
 }
 
 func TestWaitForAsyncEvent_Done(t *testing.T) {
-	eventCh := make(chan llm.StreamEvent, 1)
-	eventCh <- llm.StreamEvent{
-		Type: llm.StreamEventTypeDone,
+	eventCh := make(chan core.StreamEvent, 1)
+	eventCh <- core.StreamEvent{
+		Type: core.StreamEventTypeDone,
 	}
 	close(eventCh)
 
@@ -671,15 +671,15 @@ func TestWaitForAsyncEvent_Done(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected mainStreamMsg, got %T", msg)
 	}
-	if streamMsg.closed || streamMsg.event.Type != llm.StreamEventTypeDone {
+	if streamMsg.closed || streamMsg.event.Type != core.StreamEventTypeDone {
 		t.Fatalf("expected done event, got %#v", streamMsg)
 	}
 }
 
 func TestWaitForAsyncEvent_ReasoningChunk(t *testing.T) {
-	eventCh := make(chan llm.StreamEvent, 1)
-	eventCh <- llm.StreamEvent{
-		Type:    llm.StreamEventTypeReasoningChunk,
+	eventCh := make(chan core.StreamEvent, 1)
+	eventCh <- core.StreamEvent{
+		Type:    core.StreamEventTypeReasoningChunk,
 		Content: "thinking",
 	}
 	close(eventCh)
@@ -694,16 +694,16 @@ func TestWaitForAsyncEvent_ReasoningChunk(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected mainStreamMsg, got %T", msg)
 	}
-	if streamMsg.closed || streamMsg.event.Type != llm.StreamEventTypeReasoningChunk || streamMsg.event.Content != "thinking" {
+	if streamMsg.closed || streamMsg.event.Type != core.StreamEventTypeReasoningChunk || streamMsg.event.Content != "thinking" {
 		t.Fatalf("unexpected stream event: %#v", streamMsg)
 	}
 }
 
 func TestWaitForAsyncEvent_Error(t *testing.T) {
 	testErr := errors.New("stream error")
-	eventCh := make(chan llm.StreamEvent, 1)
-	eventCh <- llm.StreamEvent{
-		Type:  llm.StreamEventTypeError,
+	eventCh := make(chan core.StreamEvent, 1)
+	eventCh <- core.StreamEvent{
+		Type:  core.StreamEventTypeError,
 		Error: testErr,
 	}
 	close(eventCh)
@@ -715,13 +715,13 @@ func TestWaitForAsyncEvent_Error(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected mainStreamMsg, got %T", msg)
 	}
-	if streamMsg.closed || streamMsg.event.Type != llm.StreamEventTypeError || streamMsg.event.Error != testErr {
+	if streamMsg.closed || streamMsg.event.Type != core.StreamEventTypeError || streamMsg.event.Error != testErr {
 		t.Fatalf("unexpected stream event: %#v", streamMsg)
 	}
 }
 
 func TestWaitForAsyncEvent_ChannelClosed(t *testing.T) {
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	close(eventCh)
 
 	cmd := waitForAsyncEvent(eventCh, make(chan *replpermissions.Request), make(chan repltooling.DiffRequest), nil, nil)
@@ -760,7 +760,7 @@ func TestFormatResponseLines_Empty(t *testing.T) {
 
 func TestStreamHandler_Start(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 
 	sh.Start(eventCh, "Cooking...")
 
@@ -777,12 +777,12 @@ func TestStreamHandler_Start(t *testing.T) {
 
 func TestStreamHandler_Start_ResetsPreviousState(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 
 	sh.Start(eventCh, "First")
 	sh.HandleChunk("previous content")
 
-	newEventCh := make(chan llm.StreamEvent)
+	newEventCh := make(chan core.StreamEvent)
 	sh.Start(newEventCh, "Second")
 
 	if sh.GetResponse() != "" {
@@ -798,7 +798,7 @@ func TestWaitForAsyncEvent_Permission(t *testing.T) {
 	req := makeTestPermissionRequest(false)
 	permissionCh <- req
 
-	cmd := waitForAsyncEvent(make(chan llm.StreamEvent), permissionCh, make(chan repltooling.DiffRequest), nil, nil)
+	cmd := waitForAsyncEvent(make(chan core.StreamEvent), permissionCh, make(chan repltooling.DiffRequest), nil, nil)
 	msg := cmd()
 
 	permissionMsg, ok := msg.(permissionReadyMsg)
@@ -815,7 +815,7 @@ func TestWaitForAsyncEvent_Diff(t *testing.T) {
 	req := repltooling.DiffRequest{Done: make(chan struct{})}
 	diffCh <- req
 
-	cmd := waitForAsyncEvent(make(chan llm.StreamEvent), make(chan *replpermissions.Request), diffCh, nil, nil)
+	cmd := waitForAsyncEvent(make(chan core.StreamEvent), make(chan *replpermissions.Request), diffCh, nil, nil)
 	msg := cmd()
 
 	diffMsg, ok := msg.(diffReadyMsg)
@@ -849,7 +849,7 @@ func makeTestPermissionRequest(isDangerous bool) *replpermissions.Request {
 
 func TestStreamHandler_HandlePermissionRequest_AddsSegment(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -867,7 +867,7 @@ func TestStreamHandler_HandlePermissionRequest_AddsSegment(t *testing.T) {
 
 func TestStreamHandler_HasPendingPermission_True(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -879,7 +879,7 @@ func TestStreamHandler_HasPendingPermission_True(t *testing.T) {
 
 func TestStreamHandler_HasPendingPermission_FalseWhenResolved(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -892,7 +892,7 @@ func TestStreamHandler_HasPendingPermission_FalseWhenResolved(t *testing.T) {
 
 func TestStreamHandler_MovePendingCursor(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -915,7 +915,7 @@ func TestStreamHandler_MovePendingCursor(t *testing.T) {
 
 func TestStreamHandler_GetPendingChoice_NonDangerous(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -937,7 +937,7 @@ func TestStreamHandler_GetPendingChoice_NonDangerous(t *testing.T) {
 
 func TestStreamHandler_GetPendingChoice_Dangerous(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(true)
 	sh.HandlePermissionRequest(req)
@@ -950,7 +950,7 @@ func TestStreamHandler_GetPendingChoice_Dangerous(t *testing.T) {
 
 func TestStreamHandler_ResolvePendingPermission(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -963,7 +963,7 @@ func TestStreamHandler_ResolvePendingPermission(t *testing.T) {
 
 func TestRenderPermissionCard_Pending(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -986,7 +986,7 @@ func TestRenderPermissionCard_Pending(t *testing.T) {
 
 func TestRenderPermissionCard_Dangerous(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(true)
 	sh.HandlePermissionRequest(req)
@@ -1003,7 +1003,7 @@ func TestRenderPermissionCard_Dangerous(t *testing.T) {
 
 func TestRenderPermissionCard_Resolved_Allowed(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -1021,7 +1021,7 @@ func TestRenderPermissionCard_Resolved_Allowed(t *testing.T) {
 
 func TestRenderPermissionCard_Resolved_Denied(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	sh.HandlePermissionRequest(req)
@@ -1036,7 +1036,7 @@ func TestRenderPermissionCard_Resolved_Denied(t *testing.T) {
 
 func TestRenderDiffSegment_RendersRulesUsingViewportWidth(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 	sh.HandleDiff([]tools.EditDiffLine{
 		{Kind: tools.DiffLineHunk, Content: "@@ -1,2 +1,3 @@"},
 		{Kind: tools.DiffLineRemoved, Content: strings.Repeat("short ", 6), OldLineNum: 1},
@@ -1097,7 +1097,7 @@ func TestRenderDiffSegment_RendersRulesUsingViewportWidth(t *testing.T) {
 
 func TestRenderPermissionCard_PreviewTruncation(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	var previewLines []string
@@ -1116,7 +1116,7 @@ func TestRenderPermissionCard_PreviewTruncation(t *testing.T) {
 
 func TestRenderPermissionCard_LongPathWrapsWithinWidth(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(false)
 	req.Path = "/very/long/path/" + strings.Repeat("nested-directory/", 12) + "file.go"
@@ -1142,7 +1142,7 @@ func TestRenderPermissionCard_LongPathWrapsWithinWidth(t *testing.T) {
 
 func TestRenderPermissionCard_LongDangerousCommandWrapsWithinWidth(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	sh.Start(make(<-chan llm.StreamEvent), "Loading...")
+	sh.Start(make(<-chan core.StreamEvent), "Loading...")
 
 	req := makeTestPermissionRequest(true)
 	req.Path = "rm -rf " + strings.Repeat("/tmp/very-long-segment-name/", 12)
@@ -1164,7 +1164,7 @@ func TestRenderPermissionCard_LongDangerousCommandWrapsWithinWidth(t *testing.T)
 
 func TestPermissionTranscript_ResolvedBeforeDone(t *testing.T) {
 	sh := NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	sh.Start(eventCh, "Loading...")
 
 	sh.HandleChunk("before permission")
@@ -1203,7 +1203,7 @@ func TestPermissionTranscript_ResolvedBeforeDone(t *testing.T) {
 
 func TestHandleKeyMsg_PermissionEnter_ResolvesAllowed(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	req := makeTestPermissionRequest(false)
@@ -1221,7 +1221,7 @@ func TestHandleKeyMsg_PermissionEnter_ResolvesAllowed(t *testing.T) {
 
 func TestHandleKeyMsg_PermissionEsc_Denies(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	req := makeTestPermissionRequest(false)
@@ -1239,7 +1239,7 @@ func TestHandleKeyMsg_PermissionEsc_Denies(t *testing.T) {
 
 func TestHandleKeyMsg_PermissionEnter_AllowSession(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	req := makeTestPermissionRequest(false)
@@ -1258,7 +1258,7 @@ func TestHandleKeyMsg_PermissionEnter_AllowSession(t *testing.T) {
 
 func TestHandleKeyMsg_NonPermissionKey_PassesToTextarea(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	req := makeTestPermissionRequest(false)
@@ -1274,7 +1274,7 @@ func TestHandleKeyMsg_NonPermissionKey_PassesToTextarea(t *testing.T) {
 func TestHandleKeyMsg_Enter_WhenPermissionPending_DoesNotSubmit(t *testing.T) {
 	m := newTestModel()
 	m.textarea.SetValue("some user input")
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	req := makeTestPermissionRequest(false)
@@ -1291,7 +1291,7 @@ func TestHandleKeyMsg_Enter_WhenPermissionPending_DoesNotSubmit(t *testing.T) {
 }
 
 func TestStreamHandlerCheckpointPreservesActiveStream(t *testing.T) {
-	events := make(chan llm.StreamEvent)
+	events := make(chan core.StreamEvent)
 	handler := NewStreamHandler(nil)
 	handler.Start(events, "Working...")
 	handler.HandleChunk("before checkpoint")

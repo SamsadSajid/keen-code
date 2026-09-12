@@ -3,6 +3,7 @@ package repl
 import (
 	"context"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"log/slog"
 	"math/rand/v2"
 	"os"
@@ -633,7 +634,7 @@ func renderInputArea(content string, width int, focused bool, shellMode bool, bt
 	return topRule + "\n" + content + "\n" + bottomRule
 }
 
-func waitForAsyncEvent(llmCh <-chan llm.StreamEvent, permissionCh <-chan *replpermissions.Request, diffCh <-chan repltooling.DiffRequest, subagentCh <-chan subagents.ToolActivity, askUserCh <-chan *replaskuser.Request) tea.Cmd {
+func waitForAsyncEvent(llmCh <-chan core.StreamEvent, permissionCh <-chan *replpermissions.Request, diffCh <-chan repltooling.DiffRequest, subagentCh <-chan subagents.ToolActivity, askUserCh <-chan *replaskuser.Request) tea.Cmd {
 	if llmCh == nil {
 		return nil
 	}
@@ -815,7 +816,7 @@ func (m *replModel) buildAdversaryClient() error {
 	return nil
 }
 
-func waitForAdversaryEvent(llmCh <-chan llm.StreamEvent) tea.Cmd {
+func waitForAdversaryEvent(llmCh <-chan core.StreamEvent) tea.Cmd {
 	if llmCh == nil {
 		return nil
 	}
@@ -828,17 +829,17 @@ func waitForAdversaryEvent(llmCh <-chan llm.StreamEvent) tea.Cmd {
 			}
 
 			switch event.Type {
-			case llm.StreamEventTypeChunk:
+			case core.StreamEventTypeChunk:
 				return adversaryChunkMsg(event.Content)
-			case llm.StreamEventTypeToolStart:
+			case core.StreamEventTypeToolStart:
 				return adversaryToolStartMsg{toolCall: event.ToolCall}
-			case llm.StreamEventTypeToolEnd:
+			case core.StreamEventTypeToolEnd:
 				return adversaryToolEndMsg{toolCall: event.ToolCall}
-			case llm.StreamEventTypeDone:
+			case core.StreamEventTypeDone:
 				return adversaryDoneMsg{}
-			case llm.StreamEventTypeError:
+			case core.StreamEventTypeError:
 				return adversaryErrorMsg{err: event.Error}
-			case llm.StreamEventTypeIncomplete:
+			case core.StreamEventTypeIncomplete:
 				return adversaryErrorMsg{err: event.Error}
 			default:
 				continue
@@ -885,7 +886,7 @@ func (m *replModel) flushStreamRender() {
 	m.scrollToBottomIfFollowing()
 }
 
-func waitForBtwEvent(llmCh <-chan llm.StreamEvent) tea.Cmd {
+func waitForBtwEvent(llmCh <-chan core.StreamEvent) tea.Cmd {
 	if llmCh == nil {
 		return nil
 	}
@@ -898,13 +899,13 @@ func waitForBtwEvent(llmCh <-chan llm.StreamEvent) tea.Cmd {
 			}
 
 			switch event.Type {
-			case llm.StreamEventTypeChunk:
+			case core.StreamEventTypeChunk:
 				return btwChunkMsg(event.Content)
-			case llm.StreamEventTypeDone:
+			case core.StreamEventTypeDone:
 				return btwDoneMsg{}
-			case llm.StreamEventTypeError:
+			case core.StreamEventTypeError:
 				return btwErrorMsg{err: event.Error}
-			case llm.StreamEventTypeIncomplete:
+			case core.StreamEventTypeIncomplete:
 				return btwErrorMsg{err: event.Error}
 			default:
 				continue

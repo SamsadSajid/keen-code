@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/history"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -37,7 +39,7 @@ func TestExecuteValidatedTool_HidesInvalidCalls(t *testing.T) {
 	if err := registry.Register(tool); err != nil {
 		t.Fatalf("register tool: %v", err)
 	}
-	events := make(chan StreamEvent, 1)
+	events := make(chan core.StreamEvent, 1)
 
 	_, _, err, started := executeValidatedTool(context.Background(), registry, tool.Name(), map[string]any{}, events)
 
@@ -61,7 +63,7 @@ func TestExecuteValidatedTool_EmitsStartAfterValidation(t *testing.T) {
 	if err := registry.Register(tool); err != nil {
 		t.Fatalf("register tool: %v", err)
 	}
-	events := make(chan StreamEvent, 1)
+	events := make(chan core.StreamEvent, 1)
 	input := map[string]any{"value": "ok"}
 
 	_, output, err, started := executeValidatedTool(context.Background(), registry, tool.Name(), input, events)
@@ -76,7 +78,7 @@ func TestExecuteValidatedTool_EmitsStartAfterValidation(t *testing.T) {
 		t.Fatal("expected tool output")
 	}
 	event := <-events
-	if event.Type != StreamEventTypeToolStart {
+	if event.Type != core.StreamEventTypeToolStart {
 		t.Fatalf("expected tool start, got %q", event.Type)
 	}
 }
@@ -88,7 +90,7 @@ func TestExecuteValidatedTool_StripsReadFileMetadataForLLM(t *testing.T) {
 		t.Fatalf("register tool: %v", err)
 	}
 
-	_, output, err, started := executeValidatedTool(context.Background(), registry, tool.Name(), map[string]any{}, make(chan StreamEvent, 1))
+	_, output, err, started := executeValidatedTool(context.Background(), registry, tool.Name(), map[string]any{}, make(chan core.StreamEvent, 1))
 	if err != nil || !started {
 		t.Fatalf("execute tool: err = %v, started = %v", err, started)
 	}
@@ -106,7 +108,7 @@ func TestExecuteValidatedTool_StripsReadFileMetadataForLLM(t *testing.T) {
 		t.Fatalf("tool output was modified: %#v", tool.output)
 	}
 	activity := historicalToolActivity(tool.Name(), nil, tool.output, output, nil)
-	if got := historicalToolResult(activity); got == "" || got == serializeJSON(tool.output) {
+	if got := history.ToolResult(activity); got == "" || got == history.SerializeJSON(tool.output) {
 		t.Fatalf("history must retain the LLM-only output: %s", got)
 	}
 }

@@ -3,14 +3,18 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/compaction"
+	"github.com/mochow13/keen-code/internal/llm/contextreduce"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/history"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
+	"github.com/mochow13/keen-code/internal/llm/retry"
 	"github.com/mochow13/keen-code/internal/tools"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -53,7 +57,7 @@ func (s *sdkChatStream) Close() error {
 }
 
 type OpenAICompatibleClient struct {
-	provider                Provider
+	provider                providerconfig.Provider
 	model                   string
 	thinkingEffort          string
 	maxRetries              int
@@ -73,7 +77,7 @@ const (
 	openAIThinkingParamToggleAndReasoningEffort
 )
 
-func NewOpenAICompatibleClient(cfg *ClientConfig) (*OpenAICompatibleClient, error) {
+func NewOpenAICompatibleClient(cfg *providerconfig.ClientConfig) (*OpenAICompatibleClient, error) {
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		var err error
@@ -92,7 +96,7 @@ func NewOpenAICompatibleClient(cfg *ClientConfig) (*OpenAICompatibleClient, erro
 		provider:                cfg.Provider,
 		model:                   cfg.Model,
 		thinkingEffort:          cfg.ThinkingEffort,
-		maxRetries:              retryCount(cfg.MaxRetries),
+		maxRetries:              retry.Count(cfg.MaxRetries),
 		client:                  client,
 		contextWindowTokenCount: cfg.ContextWindowTokens,
 		headers:                 cfg.Headers,
@@ -104,17 +108,17 @@ func NewOpenAICompatibleClient(cfg *ClientConfig) (*OpenAICompatibleClient, erro
 	return c, nil
 }
 
-func openAICompatibleBaseURL(provider Provider) (string, error) {
+func openAICompatibleBaseURL(provider providerconfig.Provider) (string, error) {
 	switch provider {
-	case Provider(config.ProviderDeepSeek):
+	case providerconfig.Provider(config.ProviderDeepSeek):
 		return deepSeekBaseURL, nil
-	case Provider(config.ProviderMoonshotAI):
+	case providerconfig.Provider(config.ProviderMoonshotAI):
 		return moonshotAIBaseURL, nil
-	case Provider(config.ProviderZAI):
+	case providerconfig.Provider(config.ProviderZAI):
 		return zaiBaseURL, nil
-	case Provider(config.ProviderOpenCodeGo):
+	case providerconfig.Provider(config.ProviderOpenCodeGo):
 		return openCodeGoBaseURL + "/v1/", nil
-	case Provider(config.ProviderOpenAICompatible):
+	case providerconfig.Provider(config.ProviderOpenAICompatible):
 		return "", fmt.Errorf("base_url must be configured for provider: %s. %s", provider, config.ConfigFixHint)
 	default:
 		return "", fmt.Errorf("unsupported OpenAI-compatible provider: %s. %s", provider, config.ConfigFixHint)
@@ -130,17 +134,17 @@ func logOpenAIMessageOrder(messages []openai.ChatCompletionMessageParamUnion) {
 	slog.Debug("OpenAI message order:\n" + string(prettyJSON))
 }
 
-func toOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParamUnion {
+func toOpenAIMessages(messages []core.Message) []openai.ChatCompletionMessageParamUnion {
 	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
 	for messageIndex, m := range messages {
-		content := FormatMessageForProvider(m)
+		content := history.FormatMessage(m)
 		switch m.Role {
-		case RoleSystem:
+		case core.RoleSystem:
 			result = append(result, openai.SystemMessage(content))
-		case RoleUser:
+		case core.RoleUser:
 			result = append(result, openai.UserMessage(content))
-		case RoleAssistant:
-			for _, step := range historicalMessageSteps(messageIndex, m) {
+		case core.RoleAssistant:
+			for _, step := range history.MessageSteps(messageIndex, m) {
 				am := openai.ChatCompletionAssistantMessageParam{}
 				if step.Text != "" {
 					am.Content.OfString = openai.String(step.Text)
@@ -151,7 +155,7 @@ func toOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParamUni
 							ID: invocation.ID,
 							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
 								Name:      invocation.Activity.Tool,
-								Arguments: historicalToolArguments(invocation.Activity),
+								Arguments: history.ToolArguments(invocation.Activity),
 							},
 						},
 					})
@@ -160,7 +164,7 @@ func toOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParamUni
 					result = append(result, openai.ChatCompletionMessageParamUnion{OfAssistant: &am})
 				}
 				for _, invocation := range step.Activities {
-					result = append(result, openai.ToolMessage(historicalToolResult(invocation.Activity), invocation.ID))
+					result = append(result, openai.ToolMessage(history.ToolResult(invocation.Activity), invocation.ID))
 				}
 			}
 		}
@@ -224,46 +228,14 @@ func extractReasoningDelta(extra map[string]respjson.Field) string {
 	return ""
 }
 
-func emitChunk(eventCh chan<- StreamEvent, content string) {
+func emitChunk(eventCh chan<- core.StreamEvent, content string) {
 	if content == "" {
 		return
 	}
-	eventCh <- StreamEvent{
-		Type:    StreamEventTypeChunk,
+	eventCh <- core.StreamEvent{
+		Type:    core.StreamEventTypeChunk,
 		Content: content,
 	}
-}
-
-const defaultMaxRetries = 6
-
-func retryCount(maxRetries int) int {
-	if maxRetries <= 0 {
-		return defaultMaxRetries
-	}
-	return maxRetries
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	var apiErr *openai.Error
-	if errors.As(err, &apiErr) {
-		switch apiErr.StatusCode {
-		case http.StatusTooManyRequests,
-			http.StatusInternalServerError,
-			http.StatusBadGateway,
-			http.StatusServiceUnavailable,
-			http.StatusGatewayTimeout:
-			return true
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func functionToolCalls(toolCalls []openai.ChatCompletionMessageToolCallUnion) []openai.ChatCompletionMessageFunctionToolCall {
@@ -308,7 +280,7 @@ func (c *OpenAICompatibleClient) buildAssistantMessage(message openai.ChatComple
 }
 
 func emitMissingFinalContent(
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 	fullContent string,
 	streamedContent string,
 ) {
@@ -332,13 +304,13 @@ func emitMissingFinalContent(
 }
 
 func (c *OpenAICompatibleClient) shouldLogRawChunks() bool {
-	return c.provider == Provider(config.ProviderOpenCodeGo) && isOpenCodeGoKimiModel(c.model)
+	return c.provider == providerconfig.Provider(config.ProviderOpenCodeGo) && isOpenCodeGoKimiModel(c.model)
 }
 
 func (c *OpenAICompatibleClient) collectTurn(
 	ctx context.Context,
 	params openai.ChatCompletionNewParams,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 	requestOpts ...option.RequestOption,
 ) (openai.ChatCompletionMessage, string, string, bool, openai.CompletionUsage, error) {
 	stream := c.streamImpl(ctx, params, requestOpts...)
@@ -368,8 +340,8 @@ func (c *OpenAICompatibleClient) collectTurn(
 		reasoningDelta := extractReasoningDelta(delta.JSON.ExtraFields)
 		reasoningContent.WriteString(reasoningDelta)
 		if reasoningDelta != "" {
-			eventCh <- StreamEvent{
-				Type:    StreamEventTypeReasoningChunk,
+			eventCh <- core.StreamEvent{
+				Type:    core.StreamEventTypeReasoningChunk,
 				Content: reasoningDelta,
 			}
 		}
@@ -393,33 +365,23 @@ func (c *OpenAICompatibleClient) collectTurn(
 	return acc.ChatCompletion.Choices[0].Message, reasoningContent.String(), streamedContent.String(), true, acc.ChatCompletion.Usage, nil
 }
 
-func (c *OpenAICompatibleClient) collectTurnWithRetry(
-	ctx context.Context,
-	params openai.ChatCompletionNewParams,
-	eventCh chan<- StreamEvent,
-	requestOpts ...option.RequestOption,
-) (openai.ChatCompletionMessage, string, string, bool, openai.CompletionUsage, error) {
-	maxRetries := retryCount(c.maxRetries)
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		message, reasoningContent, streamedContent, hasChoice, usage, err := c.collectTurn(ctx, params, eventCh, requestOpts...)
-		if err == nil {
-			return message, reasoningContent, streamedContent, hasChoice, usage, nil
-		}
-		if !isRetryableError(err) || attempt == maxRetries {
-			return openai.ChatCompletionMessage{}, "", "", false, openai.CompletionUsage{}, err
-		}
-
-		backoff := time.Duration(attempt) * time.Second
-		slog.Debug("LLM stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", backoff, "error", err)
-		eventCh <- StreamEvent{Type: StreamEventTypeRetry, Error: err, Attempt: attempt}
-
-		select {
-		case <-ctx.Done():
-			return openai.ChatCompletionMessage{}, "", "", false, openai.CompletionUsage{}, ctx.Err()
-		case <-time.After(backoff):
-		}
+func (c *OpenAICompatibleClient) collectTurnWithRetry(ctx context.Context, params openai.ChatCompletionNewParams, eventCh chan<- core.StreamEvent, requestOpts ...option.RequestOption) (openai.ChatCompletionMessage, string, string, bool, openai.CompletionUsage, error) {
+	var message openai.ChatCompletionMessage
+	var reasoning, content string
+	var hasChoice bool
+	var usage openai.CompletionUsage
+	err := retry.Run(ctx, c.maxRetries, func(attempt, maxRetries int, err error) {
+		slog.Debug("LLM stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", time.Duration(attempt)*time.Second, "error", err)
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeRetry, Error: err, Attempt: attempt}
+	}, func() error {
+		var err error
+		message, reasoning, content, hasChoice, usage, err = c.collectTurn(ctx, params, eventCh, requestOpts...)
+		return err
+	})
+	if err != nil {
+		return openai.ChatCompletionMessage{}, "", "", false, openai.CompletionUsage{}, err
 	}
-	return openai.ChatCompletionMessage{}, "", "", false, openai.CompletionUsage{}, nil
+	return message, reasoning, content, hasChoice, usage, nil
 }
 
 func (c *OpenAICompatibleClient) injectPendingState(oaiMessages []openai.ChatCompletionMessageParamUnion) ([]openai.ChatCompletionMessageParamUnion, []openai.ChatCompletionMessageParamUnion) {
@@ -484,25 +446,25 @@ func applyOpenAIThinking(params *openai.ChatCompletionNewParams, mode openAIThin
 	}
 }
 
-func openAIThinkingMode(provider Provider, model string) openAIThinkingParamMode {
+func openAIThinkingMode(provider providerconfig.Provider, model string) openAIThinkingParamMode {
 	switch provider {
-	case Provider(config.ProviderDeepSeek):
+	case providerconfig.Provider(config.ProviderDeepSeek):
 		return openAIThinkingParamToggleAndReasoningEffort
-	case Provider(config.ProviderMoonshotAI):
+	case providerconfig.Provider(config.ProviderMoonshotAI):
 		switch model {
 		case "kimi-k3":
 			return openAIThinkingParamReasoningEffort
 		case "kimi-k2.6":
 			return openAIThinkingParamType
 		}
-	case Provider(config.ProviderZAI):
+	case providerconfig.Provider(config.ProviderZAI):
 		if model == "glm-5.2" || model == "glm-5.3" {
 			return openAIThinkingParamToggleAndReasoningEffort
 		}
 		if model == "glm-5.1" {
 			return openAIThinkingParamType
 		}
-	case Provider(config.ProviderOpenCodeGo):
+	case providerconfig.Provider(config.ProviderOpenCodeGo):
 		if isOpenCodeGoDeepSeekModel(model) {
 			return openAIThinkingParamToggleAndReasoningEffort
 		}
@@ -516,7 +478,7 @@ func openAIThinkingMode(provider Provider, model string) openAIThinkingParamMode
 	return openAIThinkingParamNone
 }
 
-func (c *OpenAICompatibleClient) exitIncomplete(eventCh chan<- StreamEvent, oaiMessages []openai.ChatCompletionMessageParamUnion, turnStartLen int, injectedPending []openai.ChatCompletionMessageParamUnion, err error, oneShot bool) {
+func (c *OpenAICompatibleClient) exitIncomplete(eventCh chan<- core.StreamEvent, oaiMessages []openai.ChatCompletionMessageParamUnion, turnStartLen int, injectedPending []openai.ChatCompletionMessageParamUnion, err error, oneShot bool) {
 	if !oneShot {
 		c.savePendingIfAccumulated(oaiMessages, turnStartLen, injectedPending)
 	}
@@ -525,11 +487,11 @@ func (c *OpenAICompatibleClient) exitIncomplete(eventCh chan<- StreamEvent, oaiM
 
 func (c *OpenAICompatibleClient) StreamChat(
 	ctx context.Context,
-	messages []Message,
+	messages []core.Message,
 	toolRegistry *tools.Registry,
-	opts ...StreamOptions,
-) (<-chan StreamEvent, error) {
-	eventCh := make(chan StreamEvent)
+	opts ...core.StreamOptions,
+) (<-chan core.StreamEvent, error) {
+	eventCh := make(chan core.StreamEvent)
 	streamOpts := streamOptions(opts)
 
 	go func() {
@@ -547,7 +509,7 @@ func (c *OpenAICompatibleClient) StreamChat(
 		oaiTools := toOpenAITools(toolRegistry)
 		requestOpts := c.requestOptions(streamOpts)
 
-		compactionHistory := CloneMessages(messages)
+		compactionHistory := core.CloneMessages(messages)
 		autoCompactOff := false
 		hasNewToolTurns := false
 		forcedRecoveryUsed := false
@@ -600,9 +562,9 @@ func (c *OpenAICompatibleClient) StreamChat(
 					"cached_tokens", usage.PromptTokensDetails.CachedTokens,
 					"reasoning_tokens", usage.CompletionTokensDetails.ReasoningTokens,
 				)
-				eventCh <- StreamEvent{
-					Type: StreamEventTypeUsage,
-					Usage: &TokenUsage{
+				eventCh <- core.StreamEvent{
+					Type: core.StreamEventTypeUsage,
+					Usage: &core.TokenUsage{
 						InputTokens:     int(usage.PromptTokens),
 						OutputTokens:    int(usage.CompletionTokens),
 						TotalTokens:     int(usage.TotalTokens),
@@ -616,7 +578,7 @@ func (c *OpenAICompatibleClient) StreamChat(
 			assistant := c.buildAssistantMessage(message, reasoningContent, toolCalls)
 
 			if len(toolCalls) == 0 {
-				eventCh <- StreamEvent{Type: StreamEventTypeDone}
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
 
@@ -628,9 +590,9 @@ func (c *OpenAICompatibleClient) StreamChat(
 			if len(toolMsgs) > 0 {
 				oaiMessages = append(oaiMessages, toolMsgs...)
 			}
-			compactionHistory = append(compactionHistory, Message{
-				Role: RoleAssistant, Content: message.Content,
-				TurnMemory: &TurnMemory{ToolActivity: activities},
+			compactionHistory = append(compactionHistory, core.Message{
+				Role: core.RoleAssistant, Content: message.Content,
+				TurnMemory: &core.TurnMemory{ToolActivity: activities},
 			})
 			autoCompactOff = false
 			hasNewToolTurns = true
@@ -644,19 +606,19 @@ func (c *OpenAICompatibleClient) StreamChat(
 
 func (c *OpenAICompatibleClient) proactivelyCompactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	oaiMessages *[]openai.ChatCompletionMessageParamUnion,
 	injectedPending *[]openai.ChatCompletionMessageParamUnion,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	if streamOpts.DisableAutoCompaction || !hasNewToolTurns || autoCompactOff ||
-		!shouldAutoCompact(
-			estimateOpenAIMessagesTokenCount(*oaiMessages),
-			contextInputBudget(c.contextWindowTokenCount),
+		!core.ShouldAutoCompact(
+			contextreduce.EstimateOpenAI(*oaiMessages),
+			core.ContextInputBudget(c.contextWindowTokenCount),
 		) {
 		return nil
 	}
@@ -669,38 +631,38 @@ func (c *OpenAICompatibleClient) proactivelyCompactHistory(
 
 func (c *OpenAICompatibleClient) reduceContextOrCompact(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	oaiMessages *[]openai.ChatCompletionMessageParamUnion,
 	injectedPending *[]openai.ChatCompletionMessageParamUnion,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	forcedRecoveryUsed bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) ([]openai.ChatCompletionMessageParamUnion, bool, error) {
-	reducedMessages, reduction := reduceOpenAIContextForRequest(c.contextWindowTokenCount, *oaiMessages)
+	reducedMessages, reduction := contextreduce.ReduceOpenAI(c.contextWindowTokenCount, *oaiMessages)
 	if reduction.FitsBudget {
 		return reducedMessages, false, nil
 	}
 	if streamOpts.DisableAutoCompaction || forcedRecoveryUsed {
-		return nil, false, fmt.Errorf("%w: %s", ErrContextWindowExceeded, contextWindowExceededError)
+		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
 	if err := c.compactHistory(
 		ctx, compactionHistory, oaiMessages, injectedPending, turnStartLen,
 		streamOpts.SessionID, eventCh,
 	); err != nil {
-		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", ErrContextWindowExceeded, err)
+		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
 }
 
 func (c *OpenAICompatibleClient) compactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	oaiMessages *[]openai.ChatCompletionMessageParamUnion,
 	injectedPending *[]openai.ChatCompletionMessageParamUnion,
 	turnStartLen *int,
 	sessionID string,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	replacement, _, err := c.autoCompact(ctx, *compactionHistory, sessionID, eventCh)
 	if err != nil {
@@ -715,38 +677,38 @@ func (c *OpenAICompatibleClient) compactHistory(
 	return nil
 }
 
-func (c *OpenAICompatibleClient) autoCompact(ctx context.Context, history []Message, sessionID string, eventCh chan<- StreamEvent) ([]Message, bool, error) {
+func (c *OpenAICompatibleClient) autoCompact(ctx context.Context, history []core.Message, sessionID string, eventCh chan<- core.StreamEvent) ([]core.Message, bool, error) {
 	compactionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	eventCh <- StreamEvent{
-		Type:           StreamEventTypeAutoCompactionStarted,
-		AutoCompaction: &AutoCompactionEvent{Cancel: cancel},
+	eventCh <- core.StreamEvent{
+		Type:           core.StreamEventTypeAutoCompactionStarted,
+		AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel},
 	}
 	replacement, usage, err := AutoCompact(compactionCtx, c, history, sessionID)
 	if err != nil {
-		eventType := StreamEventTypeAutoCompactionFailed
-		if isAutoCompactionCancellation(err) {
-			eventType = StreamEventTypeAutoCompactionCancelled
+		eventType := core.StreamEventTypeAutoCompactionFailed
+		if compaction.IsCancellation(err) {
+			eventType = core.StreamEventTypeAutoCompactionCancelled
 		}
-		eventCh <- StreamEvent{
+		eventCh <- core.StreamEvent{
 			Type:           eventType,
-			AutoCompaction: &AutoCompactionEvent{Usage: usage, Error: err},
+			AutoCompaction: &core.AutoCompactionEvent{Usage: usage, Error: err},
 		}
 		return nil, false, err
 	}
-	eventCh <- StreamEvent{
-		Type:           StreamEventTypeAutoCompactionApplied,
-		AutoCompaction: &AutoCompactionEvent{Replacement: replacement, Usage: usage},
+	eventCh <- core.StreamEvent{
+		Type:           core.StreamEventTypeAutoCompactionApplied,
+		AutoCompaction: &core.AutoCompactionEvent{Replacement: replacement, Usage: usage},
 	}
 	return replacement, true, nil
 }
 
-func (c *OpenAICompatibleClient) requestOptions(opts StreamOptions) []option.RequestOption {
+func (c *OpenAICompatibleClient) requestOptions(opts core.StreamOptions) []option.RequestOption {
 	var requestOpts []option.RequestOption
 	for k, v := range c.headers {
 		requestOpts = append(requestOpts, option.WithHeader(k, v))
 	}
-	if c.provider == Provider(config.ProviderOpenCodeGo) && opts.SessionID != "" {
+	if c.provider == providerconfig.Provider(config.ProviderOpenCodeGo) && opts.SessionID != "" {
 		requestOpts = append(requestOpts, option.WithHeader("x-opencode-session", opencodeSessionID(opts.SessionID)))
 	}
 	return requestOpts
@@ -771,13 +733,13 @@ func (c *OpenAICompatibleClient) savePendingIfAccumulated(oaiMessages []openai.C
 	c.pendingState = append(c.pendingState, newDelta...)
 }
 
-func (c *OpenAICompatibleClient) emitTerminalEvent(eventCh chan<- StreamEvent, oaiMessages []openai.ChatCompletionMessageParamUnion, turnStartLen int, injectedPending []openai.ChatCompletionMessageParamUnion, err error) {
+func (c *OpenAICompatibleClient) emitTerminalEvent(eventCh chan<- core.StreamEvent, oaiMessages []openai.ChatCompletionMessageParamUnion, turnStartLen int, injectedPending []openai.ChatCompletionMessageParamUnion, err error) {
 	if len(injectedPending) > 0 || len(oaiMessages) > turnStartLen {
-		eventCh <- StreamEvent{Type: StreamEventTypeIncomplete, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeIncomplete, Error: err}
 	} else if err != nil {
-		eventCh <- StreamEvent{Type: StreamEventTypeError, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: err}
 	} else {
-		eventCh <- StreamEvent{Type: StreamEventTypeDone}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 	}
 }
 
@@ -785,13 +747,12 @@ func (c *OpenAICompatibleClient) executeTools(
 	ctx context.Context,
 	toolCalls []openai.ChatCompletionMessageFunctionToolCall,
 	registry *tools.Registry,
-	eventCh chan<- StreamEvent,
-) ([]openai.ChatCompletionMessageParamUnion, []HistoricalToolActivity) {
+	eventCh chan<- core.StreamEvent,
+) ([]openai.ChatCompletionMessageParamUnion, []core.HistoricalToolActivity) {
 	toolMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(toolCalls))
-	activities := make([]HistoricalToolActivity, 0, len(toolCalls))
+	activities := make([]core.HistoricalToolActivity, 0, len(toolCalls))
 
 	for _, tc := range toolCalls {
-		start := time.Now()
 		input := map[string]any{}
 		if tc.Function.Arguments != "" {
 			if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
@@ -799,39 +760,13 @@ func (c *OpenAICompatibleClient) executeTools(
 			}
 		}
 		slog.Debug("Tool request", "tool", tc.Function.Name, "input", input)
-
-		rawOutput, output, execErr, toolStarted := executeValidatedTool(ctx, registry, tc.Function.Name, input, eventCh)
-
-		duration := time.Since(start)
-		toolCall := &ToolCall{
-			Name:     tc.Function.Name,
-			Input:    input,
-			Output:   rawOutput,
-			Duration: duration,
+		execution := executeTool(ctx, registry, tc.Function.Name, input, eventCh)
+		toolOutput := history.SerializeJSON(execution.LLMOutput)
+		if execution.Err != nil {
+			toolOutput = history.SerializeJSON(map[string]any{"error": execution.Err.Error()})
 		}
-
-		var toolOutput string
-		if execErr != nil {
-			toolCall.Error = execErr.Error()
-			slog.Debug("Tool response", "tool", tc.Function.Name, "error", execErr.Error(), "duration", duration)
-			if toolStarted {
-				eventCh <- StreamEvent{
-					Type:     StreamEventTypeToolEnd,
-					ToolCall: toolCall,
-				}
-			}
-			toolOutput = serializeJSON(map[string]any{"error": execErr.Error()})
-		} else {
-			slog.Debug("Tool response", "tool", tc.Function.Name, "duration", duration)
-			eventCh <- StreamEvent{
-				Type:     StreamEventTypeToolEnd,
-				ToolCall: toolCall,
-			}
-			toolOutput = serializeJSON(output)
-		}
-
 		toolMessages = append(toolMessages, openai.ToolMessage(toolOutput, tc.ID))
-		activities = append(activities, historicalToolActivity(tc.Function.Name, input, rawOutput, output, execErr))
+		activities = append(activities, execution.Activity)
 	}
 
 	return toolMessages, activities

@@ -7,6 +7,7 @@ import (
 
 	"github.com/mochow13/keen-code/internal/config"
 	"github.com/mochow13/keen-code/internal/llm"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/skills"
 	"github.com/mochow13/keen-code/internal/subagents"
 	"github.com/mochow13/keen-code/internal/tools"
@@ -15,13 +16,13 @@ import (
 const compactionUserInstruction = "Please compact this conversation according to the system instructions."
 
 type AppState struct {
-	messages        []llm.Message
+	messages        []core.Message
 	llmClient       llm.LLMClient
 	adversaryClient llm.LLMClient
 	toolRegistry    *tools.Registry
 	mode            llm.AgentMode
 	workingDir      string
-	lastUsage       *llm.TokenUsage
+	lastUsage       *core.TokenUsage
 	skills          skills.Discovery
 	skillsConfig    skills.Config
 	subagents       subagents.Discovery
@@ -29,7 +30,7 @@ type AppState struct {
 
 func New(client llm.LLMClient, workingDir string) *AppState {
 	state := &AppState{
-		messages:     []llm.Message{},
+		messages:     []core.Message{},
 		llmClient:    client,
 		toolRegistry: tools.NewRegistry(),
 		mode:         llm.ModeBuild,
@@ -40,23 +41,23 @@ func New(client llm.LLMClient, workingDir string) *AppState {
 	return state
 }
 
-func (s *AppState) AddMessage(role llm.Role, content string) {
-	s.AppendMessage(llm.Message{
+func (s *AppState) AddMessage(role core.Role, content string) {
+	s.AppendMessage(core.Message{
 		Role:    role,
 		Content: content,
 	})
 }
 
-func (s *AppState) AppendMessage(message llm.Message) {
-	s.messages = append(s.messages, llm.CloneMessage(message))
+func (s *AppState) AppendMessage(message core.Message) {
+	s.messages = append(s.messages, core.CloneMessage(message))
 }
 
-func (s *AppState) GetMessages() []llm.Message {
-	return llm.CloneMessages(s.messages)
+func (s *AppState) GetMessages() []core.Message {
+	return core.CloneMessages(s.messages)
 }
 
 func (s *AppState) ClearMessages() {
-	s.messages = []llm.Message{}
+	s.messages = []core.Message{}
 }
 
 func (s *AppState) ReloadSkills() skills.Discovery {
@@ -161,33 +162,33 @@ func (s *AppState) ResetClientState() {
 	}
 }
 
-func WithoutSystemMessages(messages []llm.Message) []llm.Message {
-	withoutSystem := make([]llm.Message, 0, len(messages))
+func WithoutSystemMessages(messages []core.Message) []core.Message {
+	withoutSystem := make([]core.Message, 0, len(messages))
 	for _, message := range messages {
-		if message.Role != llm.RoleSystem {
+		if message.Role != core.RoleSystem {
 			withoutSystem = append(withoutSystem, message)
 		}
 	}
-	return llm.CloneMessages(withoutSystem)
+	return core.CloneMessages(withoutSystem)
 }
 
-func (s *AppState) ReplaceMessages(messages []llm.Message) {
-	s.messages = llm.CloneMessages(messages)
+func (s *AppState) ReplaceMessages(messages []core.Message) {
+	s.messages = core.CloneMessages(messages)
 }
 
-func (s *AppState) StreamChat(ctx context.Context, cfg *config.ResolvedConfig, opts ...llm.StreamOptions) (<-chan llm.StreamEvent, error) {
+func (s *AppState) StreamChat(ctx context.Context, cfg *config.ResolvedConfig, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
 	if s.llmClient == nil {
 		return nil, nil
 	}
-	systemMsg := llm.Message{
-		Role:    llm.RoleSystem,
+	systemMsg := core.Message{
+		Role:    core.RoleSystem,
 		Content: llm.Build(s.workingDir, s.SkillsCatalog(), s.SubagentsCatalog(), s.mode),
 	}
-	messages := append([]llm.Message{systemMsg}, s.GetMessages()...)
+	messages := append([]core.Message{systemMsg}, s.GetMessages()...)
 	return s.llmClient.StreamChat(ctx, messages, s.EffectiveToolRegistry(), opts...)
 }
 
-func (s *AppState) buildCompactionRequest(cfg *config.ResolvedConfig, extraPrompt string) ([]llm.Message, error) {
+func (s *AppState) buildCompactionRequest(cfg *config.ResolvedConfig, extraPrompt string) ([]core.Message, error) {
 	if len(s.messages) == 0 {
 		return nil, nil
 	}
@@ -199,20 +200,20 @@ func (s *AppState) buildCompactionRequest(cfg *config.ResolvedConfig, extraPromp
 	}
 
 	snapshot := s.GetMessages()
-	requestMessages := make([]llm.Message, 0, len(snapshot)+2)
-	requestMessages = append(requestMessages, llm.Message{
-		Role:    llm.RoleSystem,
+	requestMessages := make([]core.Message, 0, len(snapshot)+2)
+	requestMessages = append(requestMessages, core.Message{
+		Role:    core.RoleSystem,
 		Content: llm.BuildCompactionPrompt(extraPrompt),
 	})
 	requestMessages = append(requestMessages, snapshot...)
-	requestMessages = append(requestMessages, llm.Message{
-		Role:    llm.RoleUser,
+	requestMessages = append(requestMessages, core.Message{
+		Role:    core.RoleUser,
 		Content: compactionUserInstruction,
 	})
 	return requestMessages, nil
 }
 
-func (s *AppState) StreamCompact(ctx context.Context, cfg *config.ResolvedConfig, extraPrompt string, opts ...llm.StreamOptions) (<-chan llm.StreamEvent, error) {
+func (s *AppState) StreamCompact(ctx context.Context, cfg *config.ResolvedConfig, extraPrompt string, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
 	requestMessages, err := s.buildCompactionRequest(cfg, extraPrompt)
 	if err != nil || requestMessages == nil {
 		return nil, err
@@ -220,32 +221,32 @@ func (s *AppState) StreamCompact(ctx context.Context, cfg *config.ResolvedConfig
 	return s.llmClient.StreamChat(ctx, requestMessages, nil, opts...)
 }
 
-func (s *AppState) StreamBtw(ctx context.Context, question string, opts ...llm.StreamOptions) (<-chan llm.StreamEvent, error) {
+func (s *AppState) StreamBtw(ctx context.Context, question string, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
 	if s.llmClient == nil {
 		return nil, nil
 	}
 	history := btwContext(s.messages, 10)
-	messages := make([]llm.Message, 0, 2+len(history))
-	messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: llm.BuildBtwPrompt(s.workingDir)})
+	messages := make([]core.Message, 0, 2+len(history))
+	messages = append(messages, core.Message{Role: core.RoleSystem, Content: llm.BuildBtwPrompt(s.workingDir)})
 	messages = append(messages, history...)
-	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: question})
-	streamOpts := llm.StreamOptions{OneShot: true}
+	messages = append(messages, core.Message{Role: core.RoleUser, Content: question})
+	streamOpts := core.StreamOptions{OneShot: true}
 	if len(opts) > 0 {
 		streamOpts.SessionID = opts[0].SessionID
 	}
 	return s.llmClient.StreamChat(ctx, messages, nil, streamOpts)
 }
 
-func (s *AppState) StreamAdversary(ctx context.Context, focus string) (<-chan llm.StreamEvent, error) {
+func (s *AppState) StreamAdversary(ctx context.Context, focus string) (<-chan core.StreamEvent, error) {
 	if s.adversaryClient == nil {
 		return nil, nil
 	}
 	history := s.GetMessages()
-	messages := make([]llm.Message, 0, 2+len(history))
-	messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: llm.BuildAdversaryPrompt(s.workingDir)})
+	messages := make([]core.Message, 0, 2+len(history))
+	messages = append(messages, core.Message{Role: core.RoleSystem, Content: llm.BuildAdversaryPrompt(s.workingDir)})
 	for _, msg := range history {
-		if msg.Role == llm.RoleAssistant {
-			messages = append(messages, llm.Message{Role: llm.RoleUser, Content: "[main agent]: " + msg.Content})
+		if msg.Role == core.RoleAssistant {
+			messages = append(messages, core.Message{Role: core.RoleUser, Content: "[main agent]: " + msg.Content})
 		} else {
 			messages = append(messages, msg)
 		}
@@ -254,7 +255,7 @@ func (s *AppState) StreamAdversary(ctx context.Context, focus string) (<-chan ll
 	if focus != "" {
 		instruction = focus
 	}
-	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: instruction})
+	messages = append(messages, core.Message{Role: core.RoleUser, Content: instruction})
 	readOnlyRegistry := s.toolRegistry.Without(
 		tools.WriteFileToolName,
 		tools.EditFileToolName,
@@ -262,12 +263,12 @@ func (s *AppState) StreamAdversary(ctx context.Context, focus string) (<-chan ll
 		tools.CallMCPToolName,
 		tools.DelegateToolName,
 	)
-	return s.adversaryClient.StreamChat(ctx, messages, readOnlyRegistry, llm.StreamOptions{OneShot: true})
+	return s.adversaryClient.StreamChat(ctx, messages, readOnlyRegistry, core.StreamOptions{OneShot: true})
 }
 
-func btwContext(messages []llm.Message, max int) []llm.Message {
+func btwContext(messages []core.Message, max int) []core.Message {
 	end := len(messages)
-	if end > 0 && messages[end-1].Role == llm.RoleUser {
+	if end > 0 && messages[end-1].Role == core.RoleUser {
 		end--
 	}
 	if end == 0 {
@@ -277,7 +278,7 @@ func btwContext(messages []llm.Message, max int) []llm.Message {
 	if start < 0 {
 		start = 0
 	}
-	result := make([]llm.Message, end-start)
+	result := make([]core.Message, end-start)
 	copy(result, messages[start:end])
 	return result
 }
@@ -287,8 +288,8 @@ func (s *AppState) ApplyCompaction(summary string) error {
 	if compacted == "" {
 		return fmt.Errorf("compaction returned empty summary")
 	}
-	s.messages = []llm.Message{{
-		Role:    llm.RoleUser,
+	s.messages = []core.Message{{
+		Role:    core.RoleUser,
 		Content: compacted,
 	}}
 	return nil
@@ -347,7 +348,7 @@ func (s *AppState) WorkingDir() string {
 	return s.workingDir
 }
 
-func (s *AppState) SetLastUsage(usage *llm.TokenUsage) {
+func (s *AppState) SetLastUsage(usage *core.TokenUsage) {
 	if usage == nil {
 		s.lastUsage = nil
 		return
@@ -356,7 +357,7 @@ func (s *AppState) SetLastUsage(usage *llm.TokenUsage) {
 	s.lastUsage = &cloned
 }
 
-func (s *AppState) GetLastUsage() *llm.TokenUsage {
+func (s *AppState) GetLastUsage() *core.TokenUsage {
 	if s.lastUsage == nil {
 		return nil
 	}
@@ -371,28 +372,28 @@ func (s *AppState) ClearContextMetrics() {
 // GetContextBreakdown estimates token usage per context category. When the
 // provider has reported input token usage, category counts are scaled so they
 // sum to the reported total; otherwise raw heuristic estimates are returned.
-func (s *AppState) GetContextBreakdown() llm.ContextBreakdown {
+func (s *AppState) GetContextBreakdown() core.ContextBreakdown {
 	systemPrompt := llm.Build(s.workingDir, s.SkillsCatalog(), s.SubagentsCatalog(), s.Mode())
 
-	var toolDefs []llm.ContextToolDef
+	var toolDefs []core.ContextToolDef
 	for _, tool := range s.EffectiveToolRegistry().All() {
-		toolDefs = append(toolDefs, llm.ContextToolDef{
+		toolDefs = append(toolDefs, core.ContextToolDef{
 			Name:        tool.Name(),
 			Description: tool.Description(),
 			InputSchema: tool.InputSchema(),
 		})
 	}
 
-	messages := make([]llm.ContextMessage, 0, len(s.messages))
+	messages := make([]core.ContextMessage, 0, len(s.messages))
 	for _, msg := range s.messages {
-		cm := llm.ContextMessage{Role: msg.Role, Content: msg.Content}
+		cm := core.ContextMessage{Role: msg.Role, Content: msg.Content}
 		if msg.TurnMemory != nil {
 			cm.ToolActivity = msg.TurnMemory.ToolActivity
 		}
 		messages = append(messages, cm)
 	}
 
-	breakdown := llm.EstimateContextBreakdown(systemPrompt, toolDefs, messages)
+	breakdown := core.EstimateContextBreakdown(systemPrompt, toolDefs, messages)
 
 	if usage := s.GetLastUsage(); usage != nil && usage.InputTokens > 0 && breakdown.TotalEstimated > 0 {
 		scale := float64(usage.InputTokens) / float64(breakdown.TotalEstimated)

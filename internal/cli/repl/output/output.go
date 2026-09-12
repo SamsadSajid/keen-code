@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	repltheme "github.com/mochow13/keen-code/internal/cli/repl/theme"
-	"github.com/mochow13/keen-code/internal/llm"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/tools"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -132,11 +132,11 @@ func (ob *OutputBuilder) IsEmpty() bool {
 	return len(ob.lines) == 0
 }
 
-func (ob *OutputBuilder) AddToolStart(toolCall *llm.ToolCall) {
+func (ob *OutputBuilder) AddToolStart(toolCall *core.ToolCall) {
 	ob.lines = append(ob.lines, FormatToolStart(toolCall, ob.workingDir))
 }
 
-func (ob *OutputBuilder) AddToolEnd(toolCall *llm.ToolCall) {
+func (ob *OutputBuilder) AddToolEnd(toolCall *core.ToolCall) {
 	ob.lines = append(ob.lines, FormatToolEnd(toolCall))
 }
 
@@ -161,12 +161,12 @@ func toolDisplayName(name string) string {
 	return toolLabelCaser.String(strings.ReplaceAll(name, "_", " "))
 }
 
-func FormatToolStart(toolCall *llm.ToolCall, workingDir string) string {
+func FormatToolStart(toolCall *core.ToolCall, workingDir string) string {
 	detail := formatToolInputDetail(toolCall.Name, toolCall.Input, workingDir)
 	return "  " + renderToolStatus("●", toolCall.Name, toolDisplayName(toolCall.Name), detail, nil, nil, false) + repltheme.ToolMetaStyle.Render("...")
 }
 
-func FormatToolDone(startCall, endCall *llm.ToolCall, workingDir string) string {
+func FormatToolDone(startCall, endCall *core.ToolCall, workingDir string) string {
 	detail := formatToolInputDetail(startCall.Name, startCall.Input, workingDir)
 	metadata, failed := formatToolResultMetadata(startCall.Name, startCall.Input, endCall)
 	errText := formatToolError(startCall.Name, endCall.Error)
@@ -176,7 +176,7 @@ func FormatToolDone(startCall, endCall *llm.ToolCall, workingDir string) string 
 	return "  " + renderToolStatus("✓", startCall.Name, toolDisplayName(startCall.Name), detail, metadata, errText, false)
 }
 
-func FormatFoldedReads(startCall *llm.ToolCall, endCalls []*llm.ToolCall, workingDir string) string {
+func FormatFoldedReads(startCall *core.ToolCall, endCalls []*core.ToolCall, workingDir string) string {
 	detail := formatToolInputDetail(startCall.Name, startCall.Input, workingDir)
 	metadata := []string{pluralize(len(endCalls), "chunk")}
 	linesRead := 0
@@ -203,7 +203,7 @@ func FormatFoldedReads(startCall *llm.ToolCall, endCalls []*llm.ToolCall, workin
 	return "  " + renderToolStatus("✓", startCall.Name, toolDisplayName(startCall.Name), detail, metadata, nil, false)
 }
 
-func FormatSubagentTool(agent string, startCall, endCall *llm.ToolCall, workingDir string) string {
+func FormatSubagentTool(agent string, startCall, endCall *core.ToolCall, workingDir string) string {
 	prefix := "[" + agent + "] "
 	if startCall == nil {
 		if endCall == nil {
@@ -221,7 +221,7 @@ func FormatSubagentTool(agent string, startCall, endCall *llm.ToolCall, workingD
 	return strings.Replace(FormatToolDone(startCall, &cloned, workingDir), toolDisplayName(startCall.Name), prefix+toolDisplayName(startCall.Name), 1)
 }
 
-func FormatToolEnd(toolCall *llm.ToolCall) string {
+func FormatToolEnd(toolCall *core.ToolCall) string {
 	metadata, failed := formatToolResultMetadata(toolCall.Name, toolCall.Input, toolCall)
 	errText := formatToolError(toolCall.Name, toolCall.Error)
 	if failed {
@@ -389,7 +389,7 @@ func formatGenericValue(value any) (string, bool) {
 	}
 }
 
-func formatToolResultMetadata(toolName string, input map[string]any, endCall *llm.ToolCall) ([]string, bool) {
+func formatToolResultMetadata(toolName string, input map[string]any, endCall *core.ToolCall) ([]string, bool) {
 	if endCall.Error != "" {
 		return withDuration(nil, endCall.Duration), true
 	}

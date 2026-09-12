@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -13,7 +14,6 @@ import (
 	replpermissions "github.com/mochow13/keen-code/internal/cli/repl/permissions"
 	repltheme "github.com/mochow13/keen-code/internal/cli/repl/theme"
 	replwidgets "github.com/mochow13/keen-code/internal/cli/repl/widgets"
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -33,7 +33,7 @@ const (
 	keyShiftDown = "shift+down"
 )
 
-func (m *replModel) handleLLMUsage(usage *llm.TokenUsage) (replModel, tea.Cmd) {
+func (m *replModel) handleLLMUsage(usage *core.TokenUsage) (replModel, tea.Cmd) {
 	if m.appState != nil && usage != nil {
 		m.appState.SetLastUsage(usage)
 		m.contextStatus.AddUsage(usage)
@@ -76,8 +76,8 @@ func (m *replModel) handleLLMDone() (replModel, tea.Cmd) {
 	m.adjustTextareaHeight()
 	m.appendResolvedAskUserSegment()
 	responseLines, response := m.stream.handler.HandleDone()
-	assistantMessage := llm.Message{
-		Role:       llm.RoleAssistant,
+	assistantMessage := core.Message{
+		Role:       core.RoleAssistant,
 		Content:    response,
 		TurnMemory: m.consumeTurnMemory(),
 	}
@@ -106,8 +106,8 @@ func (m *replModel) handleLLMIncomplete(err error) (replModel, tea.Cmd) {
 	turnMemory := m.consumeTurnMemory()
 	m.adjustTextareaHeight()
 	pendingLines, errMsg := m.stream.handler.HandleError(err)
-	assistantMessage := llm.Message{
-		Role:       llm.RoleAssistant,
+	assistantMessage := core.Message{
+		Role:       core.RoleAssistant,
 		Content:    partialResponse,
 		TurnMemory: turnMemory,
 	}
@@ -139,8 +139,8 @@ func (m *replModel) handleLLMError(err error) (replModel, tea.Cmd) {
 	turnMemory := m.consumeTurnMemory()
 	m.adjustTextareaHeight()
 	pendingLines, errMsg := m.stream.handler.HandleError(err)
-	assistantMessage := llm.Message{
-		Role:       llm.RoleAssistant,
+	assistantMessage := core.Message{
+		Role:       core.RoleAssistant,
 		Content:    partialResponse,
 		TurnMemory: turnMemory,
 	}
@@ -182,7 +182,7 @@ func (m *replModel) restoreAutomaticCompactionLoader() {
 	m.stream.handler.SetLoadingText(m.loading.text)
 }
 
-func (m *replModel) handleAutoCompactionStarted(event *llm.AutoCompactionEvent) (replModel, tea.Cmd) {
+func (m *replModel) handleAutoCompactionStarted(event *core.AutoCompactionEvent) (replModel, tea.Cmd) {
 	m.compaction.active = true
 	m.compaction.mode = compactionAutomatic
 	if event != nil {
@@ -195,7 +195,7 @@ func (m *replModel) handleAutoCompactionStarted(event *llm.AutoCompactionEvent) 
 	return *m, m.waitForAsyncEvent()
 }
 
-func (m *replModel) handleAutoCompactionApplied(event *llm.AutoCompactionEvent) (replModel, tea.Cmd) {
+func (m *replModel) handleAutoCompactionApplied(event *core.AutoCompactionEvent) (replModel, tea.Cmd) {
 	if event == nil || len(event.Replacement) == 0 {
 		return m.handleAutoCompactionStopped()
 	}
@@ -204,12 +204,12 @@ func (m *replModel) handleAutoCompactionApplied(event *llm.AutoCompactionEvent) 
 	segments := cloneStreamSegments(m.stream.handler.segments)
 	m.recordHistoricalToolActivity(segments)
 
-	var turnMemory *llm.TurnMemory
+	var turnMemory *core.TurnMemory
 	if m.turnMemory != nil {
 		turnMemory = m.turnMemory.Build()
 	}
-	checkpoint := llm.Message{
-		Role:       llm.RoleAssistant,
+	checkpoint := core.Message{
+		Role:       core.RoleAssistant,
 		Content:    m.stream.handler.GetResponse(),
 		TurnMemory: turnMemory,
 	}
@@ -303,7 +303,7 @@ func (m *replModel) handleCompactionError(err error) (replModel, tea.Cmd) {
 	return m.drainQueuedInput()
 }
 
-func (m *replModel) handleToolStart(toolCall *llm.ToolCall) (replModel, tea.Cmd) {
+func (m *replModel) handleToolStart(toolCall *core.ToolCall) (replModel, tea.Cmd) {
 	m.flushStreamRender()
 	if toolCall != nil && toolCall.Name == tools.AskUserToolName {
 		m.stream.handler.HandleToolStart(toolCall)
@@ -321,7 +321,7 @@ func (m *replModel) handleToolStart(toolCall *llm.ToolCall) (replModel, tea.Cmd)
 	return *m, m.waitForAsyncEvent()
 }
 
-func (m *replModel) handleToolEnd(toolCall *llm.ToolCall) (replModel, tea.Cmd) {
+func (m *replModel) handleToolEnd(toolCall *core.ToolCall) (replModel, tea.Cmd) {
 	m.flushStreamRender()
 	if toolCall != nil && toolCall.Name == tools.AskUserToolName {
 		m.stream.handler.HandleToolEnd(toolCall)
@@ -788,8 +788,8 @@ func (m *replModel) interruptStream(message string) {
 	m.output.AddStyledLine("\n  "+message, repltheme.InterruptedStyle)
 	m.output.AddEmptyLine()
 
-	assistantMessage := llm.Message{
-		Role:       llm.RoleAssistant,
+	assistantMessage := core.Message{
+		Role:       core.RoleAssistant,
 		Content:    partialResponse,
 		TurnMemory: turnMemory,
 	}
@@ -895,31 +895,31 @@ func (m replModel) handleLLMStreamMsg(msg tea.Msg) (replModel, tea.Cmd, bool) {
 			msg = llmDoneMsg{}
 		} else {
 			switch streamMsg.event.Type {
-			case llm.StreamEventTypeChunk:
+			case core.StreamEventTypeChunk:
 				msg = llmChunkMsg(streamMsg.event.Content)
-			case llm.StreamEventTypeReasoningChunk:
+			case core.StreamEventTypeReasoningChunk:
 				msg = llmReasoningChunkMsg(streamMsg.event.Content)
-			case llm.StreamEventTypeDone:
+			case core.StreamEventTypeDone:
 				msg = llmDoneMsg{}
-			case llm.StreamEventTypeError:
+			case core.StreamEventTypeError:
 				msg = llmErrorMsg{err: streamMsg.event.Error}
-			case llm.StreamEventTypeIncomplete:
+			case core.StreamEventTypeIncomplete:
 				msg = llmIncompleteMsg{err: streamMsg.event.Error}
-			case llm.StreamEventTypeToolStart:
+			case core.StreamEventTypeToolStart:
 				msg = llmToolStartMsg{toolCall: streamMsg.event.ToolCall}
-			case llm.StreamEventTypeToolEnd:
+			case core.StreamEventTypeToolEnd:
 				msg = llmToolEndMsg{toolCall: streamMsg.event.ToolCall}
-			case llm.StreamEventTypeUsage:
+			case core.StreamEventTypeUsage:
 				msg = llmUsageMsg{usage: streamMsg.event.Usage}
-			case llm.StreamEventTypeRetry:
+			case core.StreamEventTypeRetry:
 				msg = llmRetryMsg{err: streamMsg.event.Error, attempt: streamMsg.event.Attempt}
-			case llm.StreamEventTypeAutoCompactionStarted:
+			case core.StreamEventTypeAutoCompactionStarted:
 				msg = llmAutoCompactionStartedMsg{event: streamMsg.event.AutoCompaction}
-			case llm.StreamEventTypeAutoCompactionApplied:
+			case core.StreamEventTypeAutoCompactionApplied:
 				msg = llmAutoCompactionAppliedMsg{event: streamMsg.event.AutoCompaction}
-			case llm.StreamEventTypeAutoCompactionCancelled:
+			case core.StreamEventTypeAutoCompactionCancelled:
 				msg = llmAutoCompactionCancelledMsg{event: streamMsg.event.AutoCompaction}
-			case llm.StreamEventTypeAutoCompactionFailed:
+			case core.StreamEventTypeAutoCompactionFailed:
 				msg = llmAutoCompactionFailedMsg{event: streamMsg.event.AutoCompaction}
 			default:
 				msg = llmDoneMsg{}

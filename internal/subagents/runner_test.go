@@ -2,6 +2,7 @@ package subagents
 
 import (
 	"context"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
 	"testing"
 	"time"
@@ -13,28 +14,28 @@ import (
 )
 
 type recordingClient struct {
-	messages []llm.Message
+	messages []core.Message
 	registry *tools.Registry
-	options  []llm.StreamOptions
+	options  []core.StreamOptions
 	timeout  time.Duration
-	events   []llm.StreamEvent
+	events   []core.StreamEvent
 }
 
-func (c *recordingClient) StreamChat(ctx context.Context, messages []llm.Message, registry *tools.Registry, opts ...llm.StreamOptions) (<-chan llm.StreamEvent, error) {
-	c.messages = llm.CloneMessages(messages)
+func (c *recordingClient) StreamChat(ctx context.Context, messages []core.Message, registry *tools.Registry, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
+	c.messages = core.CloneMessages(messages)
 	c.registry = registry
-	c.options = append([]llm.StreamOptions(nil), opts...)
+	c.options = append([]core.StreamOptions(nil), opts...)
 	if deadline, ok := ctx.Deadline(); ok {
 		c.timeout = time.Until(deadline)
 	}
 	events := c.events
 	if len(events) == 0 {
-		events = []llm.StreamEvent{
-			{Type: llm.StreamEventTypeChunk, Content: "summary"},
-			{Type: llm.StreamEventTypeDone},
+		events = []core.StreamEvent{
+			{Type: core.StreamEventTypeChunk, Content: "summary"},
+			{Type: core.StreamEventTypeDone},
 		}
 	}
-	ch := make(chan llm.StreamEvent, len(events))
+	ch := make(chan core.StreamEvent, len(events))
 	for _, event := range events {
 		ch <- event
 	}
@@ -215,12 +216,12 @@ func TestForwardActivityWaitsForCapacity(t *testing.T) {
 }
 
 func TestRunnerResolvesProfileConfigAndForwardsSanitizedActivity(t *testing.T) {
-	client := &recordingClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeReasoningChunk, Content: "hidden reasoning"},
-		{Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "bash", Input: map[string]any{"command": "go test ./..."}}},
-		{Type: llm.StreamEventTypeToolEnd, ToolCall: &llm.ToolCall{Name: "bash", Output: map[string]any{"stdout": "secret body"}, Duration: time.Second}},
-		{Type: llm.StreamEventTypeChunk, Content: "private result"},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeReasoningChunk, Content: "hidden reasoning"},
+		{Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "bash", Input: map[string]any{"command": "go test ./..."}}},
+		{Type: core.StreamEventTypeToolEnd, ToolCall: &core.ToolCall{Name: "bash", Output: map[string]any{"stdout": "secret body"}, Duration: time.Second}},
+		{Type: core.StreamEventTypeChunk, Content: "private result"},
+		{Type: core.StreamEventTypeDone},
 	}}
 	activity := make(chan ToolActivity, 2)
 	var resolved Profile
@@ -253,7 +254,7 @@ func TestRunnerResolvesProfileConfigAndForwardsSanitizedActivity(t *testing.T) {
 	}
 	start := <-activity
 	end := <-activity
-	if start.Event.Type != llm.StreamEventTypeToolStart || end.Event.Type != llm.StreamEventTypeToolEnd {
+	if start.Event.Type != core.StreamEventTypeToolStart || end.Event.Type != core.StreamEventTypeToolEnd {
 		t.Fatalf("unexpected activity events: %+v %+v", start, end)
 	}
 	if start.Agent != "worker" || start.RunID == "" || start.CallID == "" || start.RunID != end.RunID || start.CallID != end.CallID {
@@ -265,10 +266,10 @@ func TestRunnerResolvesProfileConfigAndForwardsSanitizedActivity(t *testing.T) {
 }
 
 func TestRunnerIndexesDelegatedAgentActivity(t *testing.T) {
-	client := &recordingClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "README.md"}}},
-		{Type: llm.StreamEventTypeToolEnd, ToolCall: &llm.ToolCall{Name: "read_file"}},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "README.md"}}},
+		{Type: core.StreamEventTypeToolEnd, ToolCall: &core.ToolCall{Name: "read_file"}},
+		{Type: core.StreamEventTypeDone},
 	}}
 	activity := make(chan ToolActivity, 2)
 	runner := &Runner{
@@ -292,10 +293,10 @@ func TestRunnerIndexesDelegatedAgentActivity(t *testing.T) {
 }
 
 func TestRunnerOmitsIndexForSingleAgentInstance(t *testing.T) {
-	client := &recordingClient{events: []llm.StreamEvent{
-		{Type: llm.StreamEventTypeToolStart, ToolCall: &llm.ToolCall{Name: "read_file", Input: map[string]any{"path": "README.md"}}},
-		{Type: llm.StreamEventTypeToolEnd, ToolCall: &llm.ToolCall{Name: "read_file"}},
-		{Type: llm.StreamEventTypeDone},
+	client := &recordingClient{events: []core.StreamEvent{
+		{Type: core.StreamEventTypeToolStart, ToolCall: &core.ToolCall{Name: "read_file", Input: map[string]any{"path": "README.md"}}},
+		{Type: core.StreamEventTypeToolEnd, ToolCall: &core.ToolCall{Name: "read_file"}},
+		{Type: core.StreamEventTypeDone},
 	}}
 	activity := make(chan ToolActivity, 2)
 	runner := &Runner{
@@ -423,9 +424,9 @@ func TestRunnerAppliesProfileTimeout(t *testing.T) {
 }
 
 func TestCollectResultReturnsPartialTextOnError(t *testing.T) {
-	events := make(chan llm.StreamEvent, 2)
-	events <- llm.StreamEvent{Type: llm.StreamEventTypeChunk, Content: "partial"}
-	events <- llm.StreamEvent{Type: llm.StreamEventTypeIncomplete}
+	events := make(chan core.StreamEvent, 2)
+	events <- core.StreamEvent{Type: core.StreamEventTypeChunk, Content: "partial"}
+	events <- core.StreamEvent{Type: core.StreamEventTypeIncomplete}
 	close(events)
 
 	text, err := collectResult(context.Background(), events, "", "", nil)

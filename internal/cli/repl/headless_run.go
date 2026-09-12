@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"io"
 	"strings"
 
@@ -102,9 +103,9 @@ func RunHeadless(ctx context.Context, opts HeadlessRunOptions) (*HeadlessRunResu
 	if err := sessions.appendUserMessage(prompt); err != nil {
 		return nil, err
 	}
-	appState.AddMessage(llm.RoleUser, prompt)
+	appState.AddMessage(core.RoleUser, prompt)
 
-	eventCh, err := appState.StreamChat(ctx, opts.Config, llm.StreamOptions{SessionID: sessions.currentID()})
+	eventCh, err := appState.StreamChat(ctx, opts.Config, core.StreamOptions{SessionID: sessions.currentID()})
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +120,7 @@ func RunHeadless(ctx context.Context, opts HeadlessRunOptions) (*HeadlessRunResu
 	turnMemory := newTurnMemoryAccumulator(false)
 	var completedText strings.Builder
 
-	var lastUsage *llm.TokenUsage
+	var lastUsage *core.TokenUsage
 	for {
 		select {
 		case diffReq := <-diffEmitter.GetDiffChan():
@@ -130,23 +131,23 @@ func RunHeadless(ctx context.Context, opts HeadlessRunOptions) (*HeadlessRunResu
 				return finishHeadlessRun(opts.Out, format, opts.CompletionSignal, sessions, handler, turnMemory, completedText.String(), lastUsage)
 			}
 			switch event.Type {
-			case llm.StreamEventTypeChunk:
+			case core.StreamEventTypeChunk:
 				handler.HandleChunk(event.Content)
 				progress.writeText(event.Content)
-			case llm.StreamEventTypeReasoningChunk:
+			case core.StreamEventTypeReasoningChunk:
 				handler.HandleReasoningChunk(event.Content)
-			case llm.StreamEventTypeToolStart:
+			case core.StreamEventTypeToolStart:
 				handleHeadlessToolStart(handler, event.ToolCall)
 				progress.newLine()
-			case llm.StreamEventTypeToolEnd:
+			case core.StreamEventTypeToolEnd:
 				handleHeadlessToolEnd(handler, event.ToolCall)
 				progress.writeToolEnd(event.ToolCall)
-			case llm.StreamEventTypeUsage:
+			case core.StreamEventTypeUsage:
 				lastUsage = event.Usage
-			case llm.StreamEventTypeRetry:
+			case core.StreamEventTypeRetry:
 				handler.RewindForRetry()
 				progress.newLine()
-			case llm.StreamEventTypeAutoCompactionApplied:
+			case core.StreamEventTypeAutoCompactionApplied:
 				progress.newLine()
 				if err := checkpointHeadlessAutoCompaction(
 					sessions,
@@ -159,11 +160,11 @@ func RunHeadless(ctx context.Context, opts HeadlessRunOptions) (*HeadlessRunResu
 					return nil, err
 				}
 				lastUsage = nil
-			case llm.StreamEventTypeDone:
+			case core.StreamEventTypeDone:
 				return finishHeadlessRun(opts.Out, format, opts.CompletionSignal, sessions, handler, turnMemory, completedText.String(), lastUsage)
-			case llm.StreamEventTypeIncomplete:
+			case core.StreamEventTypeIncomplete:
 				return failHeadlessRun(opts.Out, format, sessions, handler, turnMemory, completedText.String(), lastUsage, event.Error)
-			case llm.StreamEventTypeError:
+			case core.StreamEventTypeError:
 				return failHeadlessRun(opts.Out, format, sessions, handler, turnMemory, completedText.String(), lastUsage, event.Error)
 			}
 		case <-ctx.Done():
@@ -185,7 +186,7 @@ func loadHeadlessSession(sessions *replSessionState, sessionID string) (*session
 	return nil, fmt.Errorf("session %q not found", sessionID)
 }
 
-func handleHeadlessToolStart(handler *StreamHandler, toolCall *llm.ToolCall) {
+func handleHeadlessToolStart(handler *StreamHandler, toolCall *core.ToolCall) {
 	if toolCall == nil {
 		return
 	}
@@ -198,7 +199,7 @@ func handleHeadlessToolStart(handler *StreamHandler, toolCall *llm.ToolCall) {
 	handler.HandleToolStart(toolCall)
 }
 
-func handleHeadlessToolEnd(handler *StreamHandler, toolCall *llm.ToolCall) {
+func handleHeadlessToolEnd(handler *StreamHandler, toolCall *core.ToolCall) {
 	if toolCall == nil {
 		return
 	}
@@ -215,7 +216,7 @@ func checkpointHeadlessAutoCompaction(
 	handler *StreamHandler,
 	turnMemory *turnMemoryAccumulator,
 	completedText *strings.Builder,
-	compaction *llm.AutoCompactionEvent,
+	compaction *core.AutoCompactionEvent,
 ) error {
 	if compaction == nil || len(compaction.Replacement) == 0 {
 		return fmt.Errorf("automatic compaction applied without replacement history")
@@ -225,8 +226,8 @@ func checkpointHeadlessAutoCompaction(
 	turnMemory.RecordToolActivity(segments, handler.workingDir)
 	response := handler.GetResponse()
 	persistedReplacement := appstate.WithoutSystemMessages(compaction.Replacement)
-	if err := sessions.appendAutoCompaction(segments, llm.Message{
-		Role:       llm.RoleAssistant,
+	if err := sessions.appendAutoCompaction(segments, core.Message{
+		Role:       core.RoleAssistant,
 		Content:    response,
 		TurnMemory: turnMemory.Build(),
 	}, persistedReplacement); err != nil {
@@ -248,13 +249,13 @@ func finishHeadlessRun(
 	handler *StreamHandler,
 	turnMemory *turnMemoryAccumulator,
 	completedText string,
-	usage *llm.TokenUsage,
+	usage *core.TokenUsage,
 ) (*HeadlessRunResult, error) {
 	segments := cloneStreamSegments(handler.segments)
 	turnMemory.RecordToolActivity(segments, handler.workingDir)
 	_, currentResponse := handler.HandleDone()
-	assistantMessage := llm.Message{
-		Role:       llm.RoleAssistant,
+	assistantMessage := core.Message{
+		Role:       core.RoleAssistant,
 		Content:    currentResponse,
 		TurnMemory: turnMemory.Build(),
 	}
@@ -284,7 +285,7 @@ func failHeadlessRun(
 	handler *StreamHandler,
 	turnMemory *turnMemoryAccumulator,
 	completedText string,
-	usage *llm.TokenUsage,
+	usage *core.TokenUsage,
 	err error,
 ) (*HeadlessRunResult, error) {
 	if err == nil {
@@ -294,8 +295,8 @@ func failHeadlessRun(
 	turnMemory.RecordToolActivity(segments, handler.workingDir)
 	partialResponse := handler.GetResponse()
 	_, errMsg := handler.HandleError(err)
-	assistantMessage := llm.Message{
-		Role:       llm.RoleAssistant,
+	assistantMessage := core.Message{
+		Role:       core.RoleAssistant,
 		Content:    partialResponse,
 		TurnMemory: turnMemory.Build(),
 	}
@@ -312,7 +313,7 @@ func failHeadlessRun(
 	return result, err
 }
 
-func cloneHeadlessUsage(usage *llm.TokenUsage) *headlessUsage {
+func cloneHeadlessUsage(usage *core.TokenUsage) *headlessUsage {
 	if usage == nil {
 		return nil
 	}

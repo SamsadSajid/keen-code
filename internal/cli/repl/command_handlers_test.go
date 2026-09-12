@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,7 @@ func TestHandleEnterKey_EmptyInput(t *testing.T) {
 func TestHandleEnterKey_ActiveStream(t *testing.T) {
 	m := newTestModel()
 	m.textarea.SetValue("some input")
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	newM, cmd := m.handleEnterKey()
@@ -66,7 +67,7 @@ func TestHandleEnterKey_ActiveStream(t *testing.T) {
 func TestHandleEnterKey_ActiveStream_AdjustsViewportHeight(t *testing.T) {
 	m := newTestModel()
 	m.textarea.SetValue("some input")
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	m.adjustTextareaHeight()
 
@@ -310,7 +311,7 @@ func TestHandleEnterKey_CompactCommandStartsCompaction(t *testing.T) {
 	m := newTestModel()
 	m.ctx.cfg = &config.ResolvedConfig{APIKey: "key", Model: "model"}
 	m.appState = replappstate.New(&mockLLMClient{}, "")
-	m.appState.AddMessage(llm.RoleUser, "hello")
+	m.appState.AddMessage(core.RoleUser, "hello")
 	m.textarea.SetValue("/compact Keep business logic details")
 
 	newM, cmd := m.handleEnterKey()
@@ -1059,7 +1060,7 @@ func TestHandleEnterKey_ClearCommand(t *testing.T) {
 	m := newTestModel()
 	client := &mockLLMClient{}
 	m.appState = replappstate.New(client, "")
-	m.appState.AddMessage(llm.RoleUser, "previous")
+	m.appState.AddMessage(core.RoleUser, "previous")
 	m.textarea.SetValue(replcommands.Clear)
 
 	newM, cmd := m.handleEnterKey()
@@ -1385,7 +1386,7 @@ func TestHandleEnterKey_BtwCommandStartsStream(t *testing.T) {
 	m := newTestModel()
 	m.ctx.cfg = &config.ResolvedConfig{APIKey: "key", Model: "model"}
 	m.appState = replappstate.New(&mockLLMClient{}, "")
-	m.appState.AddMessage(llm.RoleUser, "context message")
+	m.appState.AddMessage(core.RoleUser, "context message")
 	m.btw.streamHandler = NewStreamHandler(nil)
 	m.textarea.SetValue("/btw what is this?")
 
@@ -1410,7 +1411,7 @@ func TestHandleEnterKey_BtwCommandDuringActiveStream(t *testing.T) {
 	m.ctx.cfg = &config.ResolvedConfig{APIKey: "key", Model: "model"}
 	m.appState = replappstate.New(&mockLLMClient{}, "")
 	m.btw.streamHandler = NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	m.textarea.SetValue("/btw quick question")
 
@@ -1554,7 +1555,7 @@ func TestCancelBtwStream_ClearsState(t *testing.T) {
 	m := newTestModel()
 	m.btw.showSpinner = true
 	m.btw.streamHandler = NewStreamHandler(nil)
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.btw.streamHandler.Start(eventCh, "Loading...")
 	m.btw.lines = []string{"some lines"}
 
@@ -1588,7 +1589,7 @@ func TestCancelBtwStream_CancelsContext(t *testing.T) {
 
 func TestHandleEnterKey_QueueFullNotification(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	m.queuedInputs = []string{"msg1", "msg2", "msg3", "msg4", "msg5"}
 
@@ -1611,7 +1612,7 @@ func TestHandleEnterKey_QueueFullNotification(t *testing.T) {
 
 func TestHandleEnterKey_NonQueueableSlashCommandNotification(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	m.textarea.SetValue("/clear")
@@ -1630,7 +1631,7 @@ func TestHandleEnterKey_NonQueueableSlashCommandNotification(t *testing.T) {
 
 func TestHandleEnterKey_UnknownSkillNotification(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	m.textarea.SetValue("/nosuchskill arg")
@@ -1646,7 +1647,7 @@ func TestHandleEnterKey_UnknownSkillNotification(t *testing.T) {
 
 func TestHandleEnterKey_MultilineNormalPromptQueued(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	m.textarea.SetValue("line1\nline2")
@@ -1662,7 +1663,7 @@ func TestHandleEnterKey_MultilineNormalPromptQueued(t *testing.T) {
 
 func TestHandleEnterKey_MultilineSlashNotQueued(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
 	m.textarea.SetValue("/skill\ntext")
@@ -1706,7 +1707,7 @@ func TestDrainQueuedInput_EmptyQueueNoOp(t *testing.T) {
 func TestHandleLLMError_CanceledPreservesQueue(t *testing.T) {
 	m := newTestModel()
 	m.queuedInputs = []string{"next msg"}
-	m.stream.handler.Start(make(chan llm.StreamEvent), "Loading...")
+	m.stream.handler.Start(make(chan core.StreamEvent), "Loading...")
 	m.startLoading("Loading...")
 
 	newM, _ := m.handleLLMError(context.Canceled)
@@ -1773,7 +1774,7 @@ func TestRenderQueuedInputs_TruncatesLongMessages(t *testing.T) {
 
 func TestHandleEnterKey_EmptyQueueClearsQueue(t *testing.T) {
 	m := newTestModel()
-	eventCh := make(chan llm.StreamEvent)
+	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 	m.queuedInputs = []string{"msg1", "msg2"}
 
@@ -2277,7 +2278,7 @@ func TestHandleClearCommandPreservesModeAndResetsState(t *testing.T) {
 	m.ctx.workingDir = t.TempDir()
 	m.mode = llm.ModePlan
 	m.appState.SetMode(llm.ModePlan)
-	m.appState.AddMessage(llm.RoleUser, "message")
+	m.appState.AddMessage(core.RoleUser, "message")
 	m.loading.lastTurnElapsedMsg = "done in 1s"
 	m.history.Push("history")
 	m.permissionRequester = replpermissions.NewRequester(config.NewProjectPermissions())

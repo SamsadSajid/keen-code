@@ -15,6 +15,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -171,7 +173,7 @@ func TestAnthropicClient_StreamChat_TextChunks(t *testing.T) {
 	}
 
 	client := newTestAnthropicClient(events)
-	messages := []Message{{Role: RoleUser, Content: "Hi"}}
+	messages := []core.Message{{Role: core.RoleUser, Content: "Hi"}}
 
 	eventCh, err := client.StreamChat(context.Background(), messages, nil)
 	if err != nil {
@@ -182,11 +184,11 @@ func TestAnthropicClient_StreamChat_TextChunks(t *testing.T) {
 	var doneReceived bool
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			chunks = append(chunks, event.Content)
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			doneReceived = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -218,7 +220,7 @@ func TestAnthropicClient_StreamChat_ReasoningChunks(t *testing.T) {
 	}
 
 	client := newTestAnthropicClient(events)
-	messages := []Message{{Role: RoleUser, Content: "Think"}}
+	messages := []core.Message{{Role: core.RoleUser, Content: "Think"}}
 
 	eventCh, err := client.StreamChat(context.Background(), messages, nil)
 	if err != nil {
@@ -229,11 +231,11 @@ func TestAnthropicClient_StreamChat_ReasoningChunks(t *testing.T) {
 	var text []string
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeReasoningChunk:
+		case core.StreamEventTypeReasoningChunk:
 			reasoning = append(reasoning, event.Content)
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			text = append(text, event.Content)
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -255,17 +257,17 @@ func TestAnthropicClient_StreamChat_UsesMessageDeltaInputTokensWhenMessageStartI
 	}
 
 	client := newTestAnthropicClient(events)
-	eventCh, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var usage *TokenUsage
+	var usage *core.TokenUsage
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeUsage:
+		case core.StreamEventTypeUsage:
 			usage = event.Usage
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -290,17 +292,17 @@ func TestAnthropicClient_StreamChat_IncludesCacheTokensInInputFootprint(t *testi
 	}
 
 	client := newTestAnthropicClient(events)
-	eventCh, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var usage *TokenUsage
+	var usage *core.TokenUsage
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeUsage:
+		case core.StreamEventTypeUsage:
 			usage = event.Usage
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -333,12 +335,12 @@ func TestAnthropicClient_StreamChat_LogsPromptCacheHits(t *testing.T) {
 	}
 
 	client := newTestAnthropicClient(events)
-	eventCh, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for event := range eventCh {
-		if event.Type == StreamEventTypeError {
+		if event.Type == core.StreamEventTypeError {
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -359,14 +361,14 @@ func TestAnthropicClient_StreamChat_StreamError(t *testing.T) {
 		return &mockAnthropicStream{err: expectedErr}
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var receivedErr error
 	for event := range eventCh {
-		if event.Type == StreamEventTypeError {
+		if event.Type == core.StreamEventTypeError {
 			receivedErr = event.Error
 		}
 	}
@@ -386,18 +388,18 @@ func TestAnthropicClient_StreamChat_RetriesOnRetryableError(t *testing.T) {
 		return &mockAnthropicStream{err: expectedErr}
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var retryEvents []StreamEvent
+	var retryEvents []core.StreamEvent
 	var receivedErr error
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeRetry:
+		case core.StreamEventTypeRetry:
 			retryEvents = append(retryEvents, event)
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			receivedErr = event.Error
 		}
 	}
@@ -448,7 +450,7 @@ func TestAnthropicClient_StreamChat_ToolInvocation(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "go"}}, registry)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "go"}}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -457,21 +459,21 @@ func TestAnthropicClient_StreamChat_ToolInvocation(t *testing.T) {
 	var textChunks []string
 	for event := range eventCh {
 		switch event.Type {
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			textChunks = append(textChunks, event.Content)
-		case StreamEventTypeToolStart:
+		case core.StreamEventTypeToolStart:
 			toolStartReceived = true
 			if event.ToolCall.Name != "success_tool" {
 				t.Errorf("expected tool name success_tool, got %q", event.ToolCall.Name)
 			}
-		case StreamEventTypeToolEnd:
+		case core.StreamEventTypeToolEnd:
 			toolEndReceived = true
 			if event.ToolCall.Output == nil {
 				t.Error("expected tool output in tool_end event")
 			}
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			doneReceived = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -534,12 +536,12 @@ func TestAnthropicClient_StreamChat_PreservesThinkingBlocksForToolContinuation(t
 		t.Fatalf("register: %v", err)
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "go"}}, registry)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "go"}}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for event := range eventCh {
-		if event.Type == StreamEventTypeError {
+		if event.Type == core.StreamEventTypeError {
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
@@ -586,7 +588,7 @@ func TestAnthropicClient_executeTools_Success(t *testing.T) {
 	}
 
 	uses := []toolUseEntry{{id: "id1", name: "success_tool", input: map[string]any{"message": "hi"}}}
-	eventCh := make(chan StreamEvent, 4)
+	eventCh := make(chan core.StreamEvent, 4)
 	blocks, activities := c.executeTools(context.Background(), uses, registry, eventCh)
 	if len(activities) != 1 || activities[0].Status != "success" || !activities[0].HasRawOutput {
 		t.Fatalf("activities = %#v", activities)
@@ -597,11 +599,11 @@ func TestAnthropicClient_executeTools_Success(t *testing.T) {
 	}
 
 	start := <-eventCh
-	if start.Type != StreamEventTypeToolStart {
+	if start.Type != core.StreamEventTypeToolStart {
 		t.Fatalf("expected tool_start, got %q", start.Type)
 	}
 	end := <-eventCh
-	if end.Type != StreamEventTypeToolEnd {
+	if end.Type != core.StreamEventTypeToolEnd {
 		t.Fatalf("expected tool_end, got %q", end.Type)
 	}
 	if end.ToolCall.Error != "" {
@@ -618,7 +620,7 @@ func TestAnthropicClient_executeTools_Error(t *testing.T) {
 	}
 
 	uses := []toolUseEntry{{id: "id2", name: "failing_tool", input: map[string]any{}}}
-	eventCh := make(chan StreamEvent, 4)
+	eventCh := make(chan core.StreamEvent, 4)
 	blocks, activities := c.executeTools(context.Background(), uses, registry, eventCh)
 	if len(activities) != 1 || activities[0].Status != "error" {
 		t.Fatalf("activities = %#v", activities)
@@ -630,7 +632,7 @@ func TestAnthropicClient_executeTools_Error(t *testing.T) {
 
 	<-eventCh // tool_start
 	end := <-eventCh
-	if end.Type != StreamEventTypeToolEnd {
+	if end.Type != core.StreamEventTypeToolEnd {
 		t.Fatalf("expected tool_end, got %q", end.Type)
 	}
 	if end.ToolCall.Error != "tool failed" {
@@ -639,10 +641,10 @@ func TestAnthropicClient_executeTools_Error(t *testing.T) {
 }
 
 func TestToAnthropicMessages_SystemAndConversation(t *testing.T) {
-	messages := []Message{
-		{Role: RoleSystem, Content: "be helpful"},
-		{Role: RoleUser, Content: "hello"},
-		{Role: RoleAssistant, Content: "hi there"},
+	messages := []core.Message{
+		{Role: core.RoleSystem, Content: "be helpful"},
+		{Role: core.RoleUser, Content: "hello"},
+		{Role: core.RoleAssistant, Content: "hi there"},
 	}
 
 	systemBlocks, msgParams := toAnthropicMessages(messages)
@@ -659,12 +661,12 @@ func TestToAnthropicMessages_SystemAndConversation(t *testing.T) {
 }
 
 func TestToAnthropicMessages_TurnMemoryRendered(t *testing.T) {
-	messages := []Message{
+	messages := []core.Message{
 		{
-			Role:    RoleAssistant,
+			Role:    core.RoleAssistant,
 			Content: "done",
-			TurnMemory: &TurnMemory{
-				ToolActivity: []HistoricalToolActivity{{Tool: "read_file", Input: map[string]any{"path": "main.go"}, Status: "success"}},
+			TurnMemory: &core.TurnMemory{
+				ToolActivity: []core.HistoricalToolActivity{{Tool: "read_file", Input: map[string]any{"path": "main.go"}, Status: "success"}},
 			},
 		},
 	}
@@ -741,11 +743,11 @@ func TestAnthropicThinkingParams_Modes(t *testing.T) {
 
 func TestAnthropicThinkingParamsForMiniMaxM3(t *testing.T) {
 	models := []struct {
-		provider Provider
+		provider providerconfig.Provider
 		model    string
 	}{
-		{provider: Provider(config.ProviderMiniMax), model: "MiniMax-M3"},
-		{provider: Provider(config.ProviderOpenCodeGo), model: "minimax-m3"},
+		{provider: providerconfig.Provider(config.ProviderMiniMax), model: "MiniMax-M3"},
+		{provider: providerconfig.Provider(config.ProviderOpenCodeGo), model: "minimax-m3"},
 	}
 
 	for _, model := range models {
@@ -761,9 +763,9 @@ func TestAnthropicThinkingParamsForMiniMaxM3(t *testing.T) {
 }
 
 func TestAnthropicThinkingParamsForMiniMaxM27OmitsThinking(t *testing.T) {
-	for _, provider := range []Provider{Provider(config.ProviderMiniMax), Provider(config.ProviderOpenCodeGo)} {
+	for _, provider := range []providerconfig.Provider{providerconfig.Provider(config.ProviderMiniMax), providerconfig.Provider(config.ProviderOpenCodeGo)} {
 		model := "MiniMax-M2.7"
-		if provider == Provider(config.ProviderOpenCodeGo) {
+		if provider == providerconfig.Provider(config.ProviderOpenCodeGo) {
 			model = "minimax-m2.7"
 		}
 		thinking, outCfg, _ := anthropicThinkingParamsForModel(provider, model, "enabled")
@@ -791,7 +793,7 @@ func TestAnthropicClient_ThinkingEffort_UsedInParams(t *testing.T) {
 		}}
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -824,7 +826,7 @@ func TestAnthropicClient_NoThinkingOption_OmitsThinking(t *testing.T) {
 		}}
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -843,7 +845,7 @@ func TestAnthropicClient_AnthropicProviderUsesBlockLevelPromptCaching(t *testing
 	var capturedParams anthropic.MessageNewParams
 
 	c := &AnthropicClient{
-		provider: Provider(config.ProviderAnthropic),
+		provider: providerconfig.Provider(config.ProviderAnthropic),
 		model:    "claude-sonnet-4-6",
 	}
 	c.streamImpl = func(ctx context.Context, params anthropic.MessageNewParams, opts ...option.RequestOption) anthropicStream {
@@ -854,7 +856,7 @@ func TestAnthropicClient_AnthropicProviderUsesBlockLevelPromptCaching(t *testing
 		}}
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -877,7 +879,7 @@ func TestAnthropicClient_BlockLevelPromptCachingEnabledForCompatibleProviders(t 
 	var capturedParams anthropic.MessageNewParams
 
 	c := &AnthropicClient{
-		provider: Provider(config.ProviderMiniMax),
+		provider: providerconfig.Provider(config.ProviderMiniMax),
 		model:    "MiniMax-M2.7",
 	}
 	c.streamImpl = func(ctx context.Context, params anthropic.MessageNewParams, opts ...option.RequestOption) anthropicStream {
@@ -888,7 +890,7 @@ func TestAnthropicClient_BlockLevelPromptCachingEnabledForCompatibleProviders(t 
 		}}
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -911,7 +913,7 @@ func TestAnthropicClient_UsesBlockLevelCacheControl(t *testing.T) {
 	var capturedParams anthropic.MessageNewParams
 
 	c := &AnthropicClient{
-		provider: Provider(config.ProviderAnthropic),
+		provider: providerconfig.Provider(config.ProviderAnthropic),
 		model:    "claude-sonnet-4-6",
 	}
 	c.streamImpl = func(ctx context.Context, params anthropic.MessageNewParams, opts ...option.RequestOption) anthropicStream {
@@ -927,9 +929,9 @@ func TestAnthropicClient_UsesBlockLevelCacheControl(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{
-		{Role: RoleSystem, Content: "system prompt"},
-		{Role: RoleUser, Content: "hi"},
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleSystem, Content: "system prompt"},
+		{Role: core.RoleUser, Content: "hi"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -957,7 +959,7 @@ func TestAnthropicClient_StripsStaleCacheControl(t *testing.T) {
 	var capturedParams anthropic.MessageNewParams
 
 	c := &AnthropicClient{
-		provider: Provider(config.ProviderAnthropic),
+		provider: providerconfig.Provider(config.ProviderAnthropic),
 		model:    "claude-sonnet-4-6",
 		pendingState: []anthropic.MessageParam{
 			anthropic.NewAssistantMessage(anthropic.NewTextBlock("old assistant")),
@@ -979,9 +981,9 @@ func TestAnthropicClient_StripsStaleCacheControl(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	eventCh, err := c.StreamChat(context.Background(), []Message{
-		{Role: RoleSystem, Content: "system prompt"},
-		{Role: RoleUser, Content: "latest"},
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleSystem, Content: "system prompt"},
+		{Role: core.RoleUser, Content: "latest"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1004,22 +1006,22 @@ func TestAnthropicClient_StripsStaleCacheControl(t *testing.T) {
 }
 
 func TestAnthropicBaseURL_OpenCodeGo(t *testing.T) {
-	if got := anthropicBaseURL(Provider(config.ProviderOpenCodeGo), ""); got != openCodeGoBaseURL {
+	if got := anthropicBaseURL(providerconfig.Provider(config.ProviderOpenCodeGo), ""); got != openCodeGoBaseURL {
 		t.Fatalf("expected %q, got %q", openCodeGoBaseURL, got)
 	}
-	if got := anthropicBaseURL(Provider(config.ProviderOpenCodeGo), "https://proxy.example.com/v1"); got != "https://proxy.example.com/v1" {
+	if got := anthropicBaseURL(providerconfig.Provider(config.ProviderOpenCodeGo), "https://proxy.example.com/v1"); got != "https://proxy.example.com/v1" {
 		t.Fatalf("expected configured base URL, got %q", got)
 	}
-	if got := anthropicBaseURL(Provider(config.ProviderAnthropic), ""); got != "" {
+	if got := anthropicBaseURL(providerconfig.Provider(config.ProviderAnthropic), ""); got != "" {
 		t.Fatalf("expected empty Anthropic default override, got %q", got)
 	}
 }
 
 func TestAnthropicBaseURL_MiniMax(t *testing.T) {
-	if got := anthropicBaseURL(Provider(config.ProviderMiniMax), ""); got != miniMaxBaseURL {
+	if got := anthropicBaseURL(providerconfig.Provider(config.ProviderMiniMax), ""); got != miniMaxBaseURL {
 		t.Fatalf("expected %q, got %q", miniMaxBaseURL, got)
 	}
-	if got := anthropicBaseURL(Provider(config.ProviderMiniMax), "https://proxy.example.com/anthropic"); got != "https://proxy.example.com/anthropic" {
+	if got := anthropicBaseURL(providerconfig.Provider(config.ProviderMiniMax), "https://proxy.example.com/anthropic"); got != "https://proxy.example.com/anthropic" {
 		t.Fatalf("expected configured base URL, got %q", got)
 	}
 }
@@ -1046,7 +1048,7 @@ func TestAnthropicClient_PendingState_ErrorMidLoop(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	ch, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "go"}}, registry)
+	ch, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "go"}}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1055,10 +1057,10 @@ func TestAnthropicClient_PendingState_ErrorMidLoop(t *testing.T) {
 	var incompleteErr error
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			hasIncomplete = true
 			incompleteErr = ev.Error
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("expected incomplete, got error: %v", ev.Error)
 		}
 	}
@@ -1111,7 +1113,7 @@ func TestAnthropicClient_PendingState_InjectedOnNextCall(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	ch, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "go"}}, registry)
+	ch, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "go"}}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1123,10 +1125,10 @@ func TestAnthropicClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	}
 	savedLen := len(c.pendingState)
 
-	ch, err = c.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "go"},
-		{Role: RoleAssistant, Content: "working on it"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err = c.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "go"},
+		{Role: core.RoleAssistant, Content: "working on it"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1136,11 +1138,11 @@ func TestAnthropicClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	var streamed []string
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			hasDone = true
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			streamed = append(streamed, ev.Content)
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -1177,9 +1179,9 @@ func TestAnthropicClient_PendingState_PreservedWhenRecoveryFailsBeforeProgress(t
 		return &mockAnthropicStream{err: errors.New("API error")}
 	}
 
-	ch, err := c.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "go"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err := c.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "go"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1188,9 +1190,9 @@ func TestAnthropicClient_PendingState_PreservedWhenRecoveryFailsBeforeProgress(t
 	var hasIncomplete bool
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			hasIncomplete = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("expected incomplete, got error: %v", ev.Error)
 		}
 	}
@@ -1209,7 +1211,7 @@ func TestAnthropicClient_PendingState_NoAccumulation_EmitsError(t *testing.T) {
 		return &mockAnthropicStream{err: errors.New("API error")}
 	}
 
-	ch, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	ch, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1217,9 +1219,9 @@ func TestAnthropicClient_PendingState_NoAccumulation_EmitsError(t *testing.T) {
 	var hasError bool
 	for ev := range ch {
 		switch ev.Type {
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			hasError = true
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			t.Fatal("expected error, not incomplete")
 		}
 	}
@@ -1250,9 +1252,9 @@ func TestAnthropicClient_PendingState_ClearedOnSuccess(t *testing.T) {
 		return &mockAnthropicStream{events: successEvents}
 	}
 
-	ch, err := c.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "original"},
-		{Role: RoleUser, Content: "continue"},
+	ch, err := c.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "original"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1260,7 +1262,7 @@ func TestAnthropicClient_PendingState_ClearedOnSuccess(t *testing.T) {
 
 	var hasDone bool
 	for ev := range ch {
-		if ev.Type == StreamEventTypeDone {
+		if ev.Type == core.StreamEventTypeDone {
 			hasDone = true
 		}
 	}
@@ -1285,7 +1287,7 @@ func TestAnthropicClient_StreamChat_CustomHeaders(t *testing.T) {
 
 	c := &AnthropicClient{
 		client:   anthropic.NewClient(option.WithBaseURL(server.URL), option.WithAPIKey("test-key")),
-		provider: Provider(config.ProviderAnthropic),
+		provider: providerconfig.Provider(config.ProviderAnthropic),
 		model:    "claude-3-5-sonnet",
 		headers:  map[string]string{"x-custom-header": "custom-value"},
 	}
@@ -1293,7 +1295,7 @@ func TestAnthropicClient_StreamChat_CustomHeaders(t *testing.T) {
 		return &sdkAnthropicStream{stream: c.client.Messages.NewStreaming(ctx, params, opts...)}
 	}
 
-	ch, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	ch, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1319,14 +1321,14 @@ func TestAnthropicClient_StreamChat_OpenCodeGoSessionHeader(t *testing.T) {
 
 	c := &AnthropicClient{
 		client:   anthropic.NewClient(option.WithBaseURL(server.URL), option.WithAPIKey("test-key")),
-		provider: Provider(config.ProviderOpenCodeGo),
+		provider: providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:    "minimax-m2.7",
 	}
 	c.streamImpl = func(ctx context.Context, params anthropic.MessageNewParams, opts ...option.RequestOption) anthropicStream {
 		return &sdkAnthropicStream{stream: c.client.Messages.NewStreaming(ctx, params, opts...)}
 	}
 
-	ch, err := c.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, StreamOptions{SessionID: sessionID})
+	ch, err := c.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil, core.StreamOptions{SessionID: sessionID})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

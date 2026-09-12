@@ -1,10 +1,10 @@
 package repl
 
 import (
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"testing"
 	"time"
 
-	"github.com/mochow13/keen-code/internal/llm"
 	"github.com/mochow13/keen-code/internal/session"
 	"github.com/mochow13/keen-code/internal/tools"
 )
@@ -35,18 +35,18 @@ func TestBuildAssistantTurnEvent_MixedTranscript(t *testing.T) {
 			command: "go test ./...",
 			summary: "Run unit tests",
 			output:  "ok",
-			toolCall: &llm.ToolCall{
+			toolCall: &core.ToolCall{
 				Duration: 7 * time.Millisecond,
 			},
 		},
 		{kind: segmentDiff, diffLines: diffLines},
 	}
 
-	event := buildAssistantTurnEvent(segments, llm.Message{
-		Role:    llm.RoleAssistant,
+	event := buildAssistantTurnEvent(segments, core.Message{
+		Role:    core.RoleAssistant,
 		Content: "final answer",
-		TurnMemory: &llm.TurnMemory{
-			ToolActivity: []llm.HistoricalToolActivity{{Tool: "write_file", Input: map[string]any{"path": "a.go", "content": "content"}, Status: "success"}},
+		TurnMemory: &core.TurnMemory{
+			ToolActivity: []core.HistoricalToolActivity{{Tool: "write_file", Input: map[string]any{"path": "a.go", "content": "content"}, Status: "success"}},
 		},
 	}, false, "")
 

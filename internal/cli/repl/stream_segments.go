@@ -2,7 +2,7 @@ package repl
 
 import (
 	replpermissions "github.com/mochow13/keen-code/internal/cli/repl/permissions"
-	"github.com/mochow13/keen-code/internal/llm"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
@@ -23,7 +23,7 @@ const (
 type streamSegment struct {
 	kind             streamSegmentType
 	content          string
-	toolCall         *llm.ToolCall
+	toolCall         *core.ToolCall
 	command          string
 	summary          string
 	output           string
@@ -33,6 +33,6 @@ type streamSegment struct {
 	diffLines        []tools.EditDiffLine
 	agent            string
 	activityKey      string
-	endToolCall      *llm.ToolCall
+	endToolCall      *core.ToolCall
 	askUser          *askUserState
 }

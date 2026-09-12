@@ -2,10 +2,10 @@ package repl
 
 import (
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"io"
 
 	reploutput "github.com/mochow13/keen-code/internal/cli/repl/output"
-	"github.com/mochow13/keen-code/internal/llm"
 )
 
 // headlessProgress streams live agent text chunks and tool start lines to the
@@ -28,7 +28,7 @@ func (p *headlessProgress) writeText(content string) {
 	p.midLine = true
 }
 
-func (p *headlessProgress) writeToolEnd(toolCall *llm.ToolCall) {
+func (p *headlessProgress) writeToolEnd(toolCall *core.ToolCall) {
 	if p.out == nil || toolCall == nil {
 		return
 	}

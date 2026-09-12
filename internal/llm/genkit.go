@@ -14,6 +14,12 @@ import (
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/firebase/genkit/go/plugins/googlegenai"
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/compaction"
+	"github.com/mochow13/keen-code/internal/llm/contextreduce"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/history"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
+	"github.com/mochow13/keen-code/internal/llm/retry"
 	"github.com/mochow13/keen-code/internal/tools"
 	"google.golang.org/genai"
 )
@@ -24,7 +30,7 @@ type streamFunc func(ctx context.Context, g *genkit.Genkit, opts ...ai.GenerateO
 
 type GenkitClient struct {
 	g                       *genkit.Genkit
-	provider                Provider
+	provider                providerconfig.Provider
 	model                   string
 	thinkingEffort          string
 	maxRetries              int
@@ -34,7 +40,7 @@ type GenkitClient struct {
 	headers                 map[string]string
 }
 
-func NewGenkitClient(cfg *ClientConfig) (*GenkitClient, error) {
+func NewGenkitClient(cfg *providerconfig.ClientConfig) (*GenkitClient, error) {
 	ctx := context.Background()
 
 	var g *genkit.Genkit
@@ -59,38 +65,38 @@ func NewGenkitClient(cfg *ClientConfig) (*GenkitClient, error) {
 		provider:                cfg.Provider,
 		model:                   modelName,
 		thinkingEffort:          cfg.ThinkingEffort,
-		maxRetries:              retryCount(cfg.MaxRetries),
+		maxRetries:              retry.Count(cfg.MaxRetries),
 		contextWindowTokenCount: cfg.ContextWindowTokens,
 		streamImpl:              genkit.GenerateStream,
 		headers:                 cfg.Headers,
 	}, nil
 }
 
-func toGenkitRole(role Role) ai.Role {
+func toGenkitRole(role core.Role) ai.Role {
 	switch role {
-	case RoleUser:
+	case core.RoleUser:
 		return ai.RoleUser
-	case RoleAssistant:
+	case core.RoleAssistant:
 		return ai.RoleModel
-	case RoleSystem:
+	case core.RoleSystem:
 		return ai.RoleSystem
 	default:
 		return ai.Role(role)
 	}
 }
 
-func toGenkitMessages(messages []Message) []*ai.Message {
+func toGenkitMessages(messages []core.Message) []*ai.Message {
 	var aiMessages []*ai.Message
 	for messageIndex, m := range messages {
-		if m.Role != RoleAssistant {
+		if m.Role != core.RoleAssistant {
 			aiMessages = append(aiMessages, &ai.Message{
 				Role:    toGenkitRole(m.Role),
-				Content: []*ai.Part{ai.NewTextPart(FormatMessageForProvider(m))},
+				Content: []*ai.Part{ai.NewTextPart(history.FormatMessage(m))},
 			})
 			continue
 		}
 
-		for _, step := range historicalMessageSteps(messageIndex, m) {
+		for _, step := range history.MessageSteps(messageIndex, m) {
 			parts := make([]*ai.Part, 0, len(step.Activities)+1)
 			if step.Text != "" {
 				parts = append(parts, ai.NewTextPart(step.Text))
@@ -99,7 +105,7 @@ func toGenkitMessages(messages []Message) []*ai.Message {
 				parts = append(parts, ai.NewToolRequestPart(&ai.ToolRequest{
 					Name:  invocation.Activity.Tool,
 					Ref:   invocation.ID,
-					Input: historicalToolInput(invocation.Activity),
+					Input: history.ToolInput(invocation.Activity),
 				}))
 			}
 			if len(parts) > 0 {
@@ -111,7 +117,7 @@ func toGenkitMessages(messages []Message) []*ai.Message {
 					responses = append(responses, ai.NewToolResponsePart(&ai.ToolResponse{
 						Name:   invocation.Activity.Tool,
 						Ref:    invocation.ID,
-						Output: historicalToolResult(invocation.Activity),
+						Output: history.ToolResult(invocation.Activity),
 					}))
 				}
 				aiMessages = append(aiMessages, &ai.Message{Role: ai.RoleTool, Content: responses})
@@ -136,9 +142,9 @@ func thinkingLevelForEffort(effort string) genai.ThinkingLevel {
 	}
 }
 
-func buildGenkitGenerateConfig(thinkingEffort string, provider Provider, headers map[string]string) *genai.GenerateContentConfig {
+func buildGenkitGenerateConfig(thinkingEffort string, provider providerconfig.Provider, headers map[string]string) *genai.GenerateContentConfig {
 	var cfg *genai.GenerateContentConfig
-	if thinkingEffort != "" && provider == Provider(config.ProviderGoogleAI) {
+	if thinkingEffort != "" && provider == providerconfig.Provider(config.ProviderGoogleAI) {
 		level := thinkingLevelForEffort(thinkingEffort)
 		if level != genai.ThinkingLevelUnspecified {
 			cfg = &genai.GenerateContentConfig{
@@ -163,38 +169,22 @@ func buildGenkitGenerateConfig(thinkingEffort string, provider Provider, headers
 	return cfg
 }
 
-func (c *GenkitClient) collectTurnWithRetry(
-	ctx context.Context,
-	opts []ai.GenerateOption,
-	eventCh chan<- StreamEvent,
-) (*ai.ModelResponse, error) {
-	maxRetries := retryCount(c.maxRetries)
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		modelResponse, err := c.collectTurn(ctx, opts, eventCh)
-		if err == nil {
-			return modelResponse, nil
-		}
-		if !isRetryableError(err) || attempt == maxRetries {
-			return nil, err
-		}
-
-		backoff := time.Duration(attempt) * time.Second
-		slog.Debug("LLM stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", backoff, "error", err)
-		eventCh <- StreamEvent{Type: StreamEventTypeRetry, Error: err, Attempt: attempt}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(backoff):
-		}
+func (c *GenkitClient) collectTurnWithRetry(ctx context.Context, opts []ai.GenerateOption, eventCh chan<- core.StreamEvent) (*ai.ModelResponse, error) {
+	var response *ai.ModelResponse
+	err := retry.Run(ctx, c.maxRetries, func(attempt, maxRetries int, err error) {
+		slog.Debug("LLM stream error, retrying", "attempt", attempt, "maxRetries", maxRetries, "backoff", time.Duration(attempt)*time.Second, "error", err)
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeRetry, Error: err, Attempt: attempt}
+	}, func() error { var err error; response, err = c.collectTurn(ctx, opts, eventCh); return err })
+	if err != nil {
+		return nil, err
 	}
-	return nil, nil
+	return response, nil
 }
 
 func (c *GenkitClient) collectTurn(
 	ctx context.Context,
 	opts []ai.GenerateOption,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) (*ai.ModelResponse, error) {
 	stream := c.streamImpl(ctx, c.g, opts...)
 	var modelResponse *ai.ModelResponse
@@ -212,13 +202,13 @@ func (c *GenkitClient) collectTurn(
 		if result.Chunk != nil && len(result.Chunk.Content) > 0 {
 			for _, part := range result.Chunk.Content {
 				if part.IsReasoning() && part.Text != "" {
-					eventCh <- StreamEvent{
-						Type:    StreamEventTypeReasoningChunk,
+					eventCh <- core.StreamEvent{
+						Type:    core.StreamEventTypeReasoningChunk,
 						Content: part.Text,
 					}
 				} else if (part.IsText() || part.IsData()) && part.Text != "" {
-					eventCh <- StreamEvent{
-						Type:    StreamEventTypeChunk,
+					eventCh <- core.StreamEvent{
+						Type:    core.StreamEventTypeChunk,
 						Content: part.Text,
 					}
 				}
@@ -231,18 +221,18 @@ func (c *GenkitClient) collectTurn(
 
 func (c *GenkitClient) StreamChat(
 	ctx context.Context,
-	messages []Message,
+	messages []core.Message,
 	toolRegistry *tools.Registry,
-	opts ...StreamOptions,
-) (<-chan StreamEvent, error) {
-	eventCh := make(chan StreamEvent)
+	opts ...core.StreamOptions,
+) (<-chan core.StreamEvent, error) {
+	eventCh := make(chan core.StreamEvent)
 
 	go func() {
 		defer close(eventCh)
 
 		streamOpts := streamOptions(opts)
 		oneShot := streamOpts.OneShot
-		compactionHistory := CloneMessages(messages)
+		compactionHistory := core.CloneMessages(messages)
 		aiMessages := toGenkitMessages(compactionHistory)
 		var injectedPending []*ai.Message
 		if !oneShot {
@@ -311,9 +301,9 @@ func (c *GenkitClient) StreamChat(
 			}
 
 			if modelResponse.Usage != nil && (modelResponse.Usage.InputTokens > 0 || modelResponse.Usage.OutputTokens > 0) {
-				eventCh <- StreamEvent{
-					Type: StreamEventTypeUsage,
-					Usage: &TokenUsage{
+				eventCh <- core.StreamEvent{
+					Type: core.StreamEventTypeUsage,
+					Usage: &core.TokenUsage{
 						InputTokens:  modelResponse.Usage.InputTokens,
 						OutputTokens: modelResponse.Usage.OutputTokens,
 						TotalTokens:  modelResponse.Usage.TotalTokens,
@@ -323,7 +313,7 @@ func (c *GenkitClient) StreamChat(
 
 			toolRequests := modelResponse.ToolRequests()
 			if len(toolRequests) == 0 {
-				eventCh <- StreamEvent{Type: StreamEventTypeDone}
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
 
@@ -337,10 +327,10 @@ func (c *GenkitClient) StreamChat(
 				}
 				aiMessages = append(aiMessages, toolMsg)
 			}
-			compactionHistory = append(compactionHistory, Message{
-				Role:       RoleAssistant,
+			compactionHistory = append(compactionHistory, core.Message{
+				Role:       core.RoleAssistant,
 				Content:    genkitAssistantText(modelResponse.Message),
-				TurnMemory: &TurnMemory{ToolActivity: activities},
+				TurnMemory: &core.TurnMemory{ToolActivity: activities},
 			})
 			hasNewToolTurns = true
 			autoCompactOff = false
@@ -354,17 +344,17 @@ func (c *GenkitClient) StreamChat(
 
 func (c *GenkitClient) proactivelyCompactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	aiMessages *[]*ai.Message,
 	injectedPending *[]*ai.Message,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || !hasNewToolTurns || autoCompactOff || len(*injectedPending) > 0 ||
-		!shouldAutoCompact(estimateGenkitMessagesTokenCount(*aiMessages), contextInputBudget(c.contextWindowTokenCount)) {
+		!core.ShouldAutoCompact(contextreduce.EstimateGenkit(*aiMessages), core.ContextInputBudget(c.contextWindowTokenCount)) {
 		return nil
 	}
 	return c.compactHistory(ctx, compactionHistory, aiMessages, injectedPending, turnStartLen, streamOpts.SessionID, eventCh)
@@ -372,48 +362,48 @@ func (c *GenkitClient) proactivelyCompactHistory(
 
 func (c *GenkitClient) reduceContextOrCompact(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	aiMessages *[]*ai.Message,
 	injectedPending *[]*ai.Message,
 	turnStartLen *int,
-	streamOpts StreamOptions,
+	streamOpts core.StreamOptions,
 	forcedRecoveryUsed bool,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) ([]*ai.Message, bool, error) {
-	reducedMessages, reduction := reduceGenkitContextForRequest(c.contextWindowTokenCount, *aiMessages)
+	reducedMessages, reduction := contextreduce.ReduceGenkit(c.contextWindowTokenCount, *aiMessages)
 	if reduction.FitsBudget {
 		return reducedMessages, false, nil
 	}
 
 	slog.Debug("Genkit context still exceeds budget after reduction", "inputTokenCount", reduction.ReducedTokenCount, "removedToolResultCount", reduction.RemovedToolResults)
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || forcedRecoveryUsed || len(*injectedPending) > 0 {
-		return nil, false, fmt.Errorf("%w: %s", ErrContextWindowExceeded, contextWindowExceededError)
+		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
 	if err := c.compactHistory(ctx, compactionHistory, aiMessages, injectedPending, turnStartLen, streamOpts.SessionID, eventCh); err != nil {
-		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", ErrContextWindowExceeded, err)
+		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
 }
 
 func (c *GenkitClient) compactHistory(
 	ctx context.Context,
-	compactionHistory *[]Message,
+	compactionHistory *[]core.Message,
 	aiMessages *[]*ai.Message,
 	injectedPending *[]*ai.Message,
 	turnStartLen *int,
 	sessionID string,
-	eventCh chan<- StreamEvent,
+	eventCh chan<- core.StreamEvent,
 ) error {
 	compactionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	eventCh <- StreamEvent{Type: StreamEventTypeAutoCompactionStarted, AutoCompaction: &AutoCompactionEvent{Cancel: cancel}}
+	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionStarted, AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel}}
 	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, sessionID)
 	if err != nil {
-		eventType := StreamEventTypeAutoCompactionFailed
-		if isAutoCompactionCancellation(err) {
-			eventType = StreamEventTypeAutoCompactionCancelled
+		eventType := core.StreamEventTypeAutoCompactionFailed
+		if compaction.IsCancellation(err) {
+			eventType = core.StreamEventTypeAutoCompactionCancelled
 		}
-		eventCh <- StreamEvent{Type: eventType, AutoCompaction: &AutoCompactionEvent{Error: err, Usage: usage}}
+		eventCh <- core.StreamEvent{Type: eventType, AutoCompaction: &core.AutoCompactionEvent{Error: err, Usage: usage}}
 		return err
 	}
 
@@ -422,7 +412,7 @@ func (c *GenkitClient) compactHistory(
 	*injectedPending = nil
 	*turnStartLen = len(*aiMessages)
 	c.pendingState = nil
-	eventCh <- StreamEvent{Type: StreamEventTypeAutoCompactionApplied, AutoCompaction: &AutoCompactionEvent{Replacement: replacement, Usage: usage}}
+	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionApplied, AutoCompaction: &core.AutoCompactionEvent{Replacement: replacement, Usage: usage}}
 	return nil
 }
 
@@ -475,17 +465,17 @@ func (c *GenkitClient) savePendingIfAccumulated(aiMessages []*ai.Message, turnSt
 	c.pendingState = append(c.pendingState, newDelta...)
 }
 
-func (c *GenkitClient) emitTerminalEvent(eventCh chan<- StreamEvent, aiMessages []*ai.Message, turnStartLen int, injectedPending []*ai.Message, err error) {
+func (c *GenkitClient) emitTerminalEvent(eventCh chan<- core.StreamEvent, aiMessages []*ai.Message, turnStartLen int, injectedPending []*ai.Message, err error) {
 	if len(injectedPending) > 0 || len(aiMessages) > turnStartLen {
-		eventCh <- StreamEvent{Type: StreamEventTypeIncomplete, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeIncomplete, Error: err}
 	} else if err != nil {
-		eventCh <- StreamEvent{Type: StreamEventTypeError, Error: err}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: err}
 	} else {
-		eventCh <- StreamEvent{Type: StreamEventTypeDone}
+		eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 	}
 }
 
-func (c *GenkitClient) exitIncomplete(eventCh chan<- StreamEvent, aiMessages []*ai.Message, turnStartLen int, injectedPending []*ai.Message, err error, oneShot bool) {
+func (c *GenkitClient) exitIncomplete(eventCh chan<- core.StreamEvent, aiMessages []*ai.Message, turnStartLen int, injectedPending []*ai.Message, err error, oneShot bool) {
 	if !oneShot {
 		c.savePendingIfAccumulated(aiMessages, turnStartLen, injectedPending)
 	}
@@ -496,14 +486,12 @@ func (c *GenkitClient) executeTools(
 	ctx context.Context,
 	toolRequests []*ai.ToolRequest,
 	registry *tools.Registry,
-	eventCh chan<- StreamEvent,
-) ([]*ai.Part, []HistoricalToolActivity) {
+	eventCh chan<- core.StreamEvent,
+) ([]*ai.Part, []core.HistoricalToolActivity) {
 	toolResponseParts := make([]*ai.Part, 0, len(toolRequests))
-	activities := make([]HistoricalToolActivity, 0, len(toolRequests))
+	activities := make([]core.HistoricalToolActivity, 0, len(toolRequests))
 
 	for _, req := range toolRequests {
-		start := time.Now()
-
 		input, _ := req.Input.(map[string]any)
 		if input == nil {
 			if raw, ok := req.Input.(json.RawMessage); ok {
@@ -513,48 +501,19 @@ func (c *GenkitClient) executeTools(
 			}
 		}
 		slog.Debug("Tool request", "tool", req.Name, "input", input)
-
-		rawOutput, output, execErr, toolStarted := executeValidatedTool(ctx, registry, req.Name, input, eventCh)
-
-		duration := time.Since(start)
-
-		toolCall := &ToolCall{
-			Name:     req.Name,
-			Input:    input,
-			Output:   rawOutput,
-			Duration: duration,
+		execution := executeTool(ctx, registry, req.Name, input, eventCh)
+		output := execution.LLMOutput
+		if execution.Err != nil {
+			output = map[string]any{"error": execution.Err.Error()}
+		} else if output == nil {
+			output = map[string]any{}
 		}
-
-		if execErr != nil {
-			toolCall.Error = execErr.Error()
-			slog.Debug("Tool response", "tool", req.Name, "error", execErr.Error(), "duration", duration)
-			if toolStarted {
-				eventCh <- StreamEvent{
-					Type:     StreamEventTypeToolEnd,
-					ToolCall: toolCall,
-				}
-			}
-			toolResponseParts = append(toolResponseParts, ai.NewToolResponsePart(&ai.ToolResponse{
-				Name:   req.Name,
-				Ref:    req.Ref,
-				Output: map[string]any{"error": execErr.Error()},
-			}))
-		} else {
-			slog.Debug("Tool response", "tool", req.Name, "duration", duration)
-			eventCh <- StreamEvent{
-				Type:     StreamEventTypeToolEnd,
-				ToolCall: toolCall,
-			}
-			if output == nil {
-				output = map[string]any{}
-			}
-			toolResponseParts = append(toolResponseParts, ai.NewToolResponsePart(&ai.ToolResponse{
-				Name:   req.Name,
-				Ref:    req.Ref,
-				Output: output,
-			}))
-		}
-		activities = append(activities, historicalToolActivity(req.Name, input, rawOutput, output, execErr))
+		toolResponseParts = append(toolResponseParts, ai.NewToolResponsePart(&ai.ToolResponse{
+			Name:   req.Name,
+			Ref:    req.Ref,
+			Output: output,
+		}))
+		activities = append(activities, execution.Activity)
 	}
 
 	return toolResponseParts, activities

@@ -2,9 +2,8 @@ package subagents
 
 import (
 	"fmt"
+	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
-
-	"github.com/mochow13/keen-code/internal/llm"
 )
 
 const childSecurityPrompt = `# Mandatory Security Instructions
@@ -23,10 +22,10 @@ const childBoundaryPrompt = `# Mandatory Subagent Boundary
 - The delegate_task tool is unavailable.
 - Complete only the delegated task and return the result to the parent agent.`
 
-func (r *Runner) childMessages(profile Profile, task string) []llm.Message {
-	return []llm.Message{
-		{Role: llm.RoleSystem, Content: r.childPrompt(profile)},
-		{Role: llm.RoleUser, Content: buildUserTask(task)},
+func (r *Runner) childMessages(profile Profile, task string) []core.Message {
+	return []core.Message{
+		{Role: core.RoleSystem, Content: r.childPrompt(profile)},
+		{Role: core.RoleUser, Content: buildUserTask(task)},
 	}
 }
 

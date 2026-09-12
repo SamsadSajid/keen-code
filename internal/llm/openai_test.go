@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/mochow13/keen-code/internal/config"
+	"github.com/mochow13/keen-code/internal/llm/core"
+	"github.com/mochow13/keen-code/internal/llm/providerconfig"
 	"github.com/mochow13/keen-code/internal/tools"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -145,8 +147,8 @@ func makeContentChunk(content string) openai.ChatCompletionChunk {
 }
 
 func TestNewOpenAICompatibleClient_DeepSeek(t *testing.T) {
-	client, err := NewOpenAICompatibleClient(&ClientConfig{
-		Provider: Provider(config.ProviderDeepSeek),
+	client, err := NewOpenAICompatibleClient(&providerconfig.ClientConfig{
+		Provider: providerconfig.Provider(config.ProviderDeepSeek),
 		APIKey:   "test-key",
 		Model:    "deepseek-chat",
 	})
@@ -162,8 +164,8 @@ func TestNewOpenAICompatibleClient_DeepSeek(t *testing.T) {
 }
 
 func TestNewOpenAICompatibleClient_OpenAIProviderRejected(t *testing.T) {
-	client, err := NewOpenAICompatibleClient(&ClientConfig{
-		Provider: Provider(config.ProviderOpenAI),
+	client, err := NewOpenAICompatibleClient(&providerconfig.ClientConfig{
+		Provider: providerconfig.Provider(config.ProviderOpenAI),
 		APIKey:   "test-key",
 		Model:    "gpt-4.1-mini",
 	})
@@ -184,7 +186,7 @@ func TestOpenAICompatibleClient_StreamChat_CustomHeaders(t *testing.T) {
 	defer server.Close()
 
 	client := &OpenAICompatibleClient{
-		provider: Provider(config.ProviderDeepSeek),
+		provider: providerconfig.Provider(config.ProviderDeepSeek),
 		model:    "deepseek-v4-pro",
 		client:   openai.NewClient(option.WithBaseURL(server.URL), option.WithAPIKey("test-key")),
 		headers:  map[string]string{"x-custom-header": "custom-value"},
@@ -193,7 +195,7 @@ func TestOpenAICompatibleClient_StreamChat_CustomHeaders(t *testing.T) {
 		return &sdkChatStream{stream: client.client.Chat.Completions.NewStreaming(ctx, params, opts...)}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -219,7 +221,7 @@ func TestOpenAICompatibleClient_StreamChat_OpenCodeGoSessionHeader(t *testing.T)
 	defer server.Close()
 
 	client := &OpenAICompatibleClient{
-		provider: Provider(config.ProviderOpenCodeGo),
+		provider: providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:    "glm-5.1",
 		client:   openai.NewClient(option.WithBaseURL(server.URL), option.WithAPIKey("test-key")),
 	}
@@ -227,7 +229,7 @@ func TestOpenAICompatibleClient_StreamChat_OpenCodeGoSessionHeader(t *testing.T)
 		return &sdkChatStream{stream: client.client.Chat.Completions.NewStreaming(ctx, params, opts...)}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, StreamOptions{SessionID: sessionID})
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, nil, core.StreamOptions{SessionID: sessionID})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -241,7 +243,7 @@ func TestOpenAICompatibleClient_StreamChat_OpenCodeGoSessionHeader(t *testing.T)
 
 func TestOpenAICompatibleClient_StreamChat_InjectsReasoningContentAcrossToolTurns(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider: Provider(config.ProviderDeepSeek),
+		provider: providerconfig.Provider(config.ProviderDeepSeek),
 		model:    "deepseek-reasoner",
 	}
 
@@ -274,8 +276,8 @@ func TestOpenAICompatibleClient_StreamChat_InjectsReasoningContentAcrossToolTurn
 		t.Fatalf("register tool: %v", err)
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -288,17 +290,17 @@ func TestOpenAICompatibleClient_StreamChat_InjectsReasoningContentAcrossToolTurn
 	var reasoning strings.Builder
 	for ev := range eventCh {
 		switch ev.Type {
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			hasDone = true
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			streamed.WriteString(ev.Content)
-		case StreamEventTypeReasoningChunk:
+		case core.StreamEventTypeReasoningChunk:
 			reasoning.WriteString(ev.Content)
-		case StreamEventTypeToolStart:
+		case core.StreamEventTypeToolStart:
 			toolStartCount++
-		case StreamEventTypeToolEnd:
+		case core.StreamEventTypeToolEnd:
 			toolEndCount++
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -325,7 +327,7 @@ func TestOpenAICompatibleClient_StreamChat_InjectsReasoningContentAcrossToolTurn
 
 func TestOpenAICompatibleClient_StreamChat_CapturesReasoningFieldAcrossToolTurns(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderOpenCodeGo),
+		provider:       providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:          "kimi-k2.6",
 		thinkingEffort: "enabled",
 	}
@@ -359,8 +361,8 @@ func TestOpenAICompatibleClient_StreamChat_CapturesReasoningFieldAcrossToolTurns
 		t.Fatalf("register tool: %v", err)
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -369,9 +371,9 @@ func TestOpenAICompatibleClient_StreamChat_CapturesReasoningFieldAcrossToolTurns
 	var reasoning strings.Builder
 	for ev := range eventCh {
 		switch ev.Type {
-		case StreamEventTypeReasoningChunk:
+		case core.StreamEventTypeReasoningChunk:
 			reasoning.WriteString(ev.Content)
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected stream error: %v", ev.Error)
 		}
 	}
@@ -388,8 +390,8 @@ func TestOpenAICompatibleClient_StreamChat_CapturesReasoningFieldAcrossToolTurns
 }
 
 func TestNewOpenAICompatibleClient_ZAI(t *testing.T) {
-	client, err := NewOpenAICompatibleClient(&ClientConfig{
-		Provider: Provider(config.ProviderZAI),
+	client, err := NewOpenAICompatibleClient(&providerconfig.ClientConfig{
+		Provider: providerconfig.Provider(config.ProviderZAI),
 		APIKey:   "test-key",
 		Model:    "glm-4-plus",
 	})
@@ -405,8 +407,8 @@ func TestNewOpenAICompatibleClient_ZAI(t *testing.T) {
 }
 
 func TestNewOpenAICompatibleClient_OpenCodeGo(t *testing.T) {
-	client, err := NewOpenAICompatibleClient(&ClientConfig{
-		Provider: Provider(config.ProviderOpenCodeGo),
+	client, err := NewOpenAICompatibleClient(&providerconfig.ClientConfig{
+		Provider: providerconfig.Provider(config.ProviderOpenCodeGo),
 		APIKey:   "test-key",
 		Model:    "kimi-k2.6",
 	})
@@ -416,7 +418,7 @@ func TestNewOpenAICompatibleClient_OpenCodeGo(t *testing.T) {
 	if client == nil {
 		t.Fatal("expected client")
 	}
-	if client.provider != Provider(config.ProviderOpenCodeGo) {
+	if client.provider != providerconfig.Provider(config.ProviderOpenCodeGo) {
 		t.Fatalf("expected provider opencode-go, got %s", client.provider)
 	}
 	if client.model != "kimi-k2.6" {
@@ -425,7 +427,7 @@ func TestNewOpenAICompatibleClient_OpenCodeGo(t *testing.T) {
 }
 
 func TestOpenAICompatibleBaseURL_OpenCodeGo(t *testing.T) {
-	baseURL, err := openAICompatibleBaseURL(Provider(config.ProviderOpenCodeGo))
+	baseURL, err := openAICompatibleBaseURL(providerconfig.Provider(config.ProviderOpenCodeGo))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -436,8 +438,8 @@ func TestOpenAICompatibleBaseURL_OpenCodeGo(t *testing.T) {
 }
 
 func TestOpenAICompatibleClient_StoresThinkingEffort(t *testing.T) {
-	client, err := NewOpenAICompatibleClient(&ClientConfig{
-		Provider:       Provider(config.ProviderDeepSeek),
+	client, err := NewOpenAICompatibleClient(&providerconfig.ClientConfig{
+		Provider:       providerconfig.Provider(config.ProviderDeepSeek),
 		APIKey:         "test-key",
 		Model:          "deepseek-v4-pro",
 		ThinkingEffort: "high",
@@ -452,7 +454,7 @@ func TestOpenAICompatibleClient_StoresThinkingEffort(t *testing.T) {
 
 func TestOpenAICompatibleClient_DeepSeek_ThinkingEffort(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderDeepSeek),
+		provider:       providerconfig.Provider(config.ProviderDeepSeek),
 		model:          "deepseek-v4-pro",
 		thinkingEffort: "high",
 	}
@@ -465,8 +467,8 @@ func TestOpenAICompatibleClient_DeepSeek_ThinkingEffort(t *testing.T) {
 		}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "test"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "test"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -496,7 +498,7 @@ func TestOpenAICompatibleClient_DeepSeek_ThinkingEffort(t *testing.T) {
 
 func TestOpenAICompatibleClient_DeepSeek_ThinkingDisabled(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderDeepSeek),
+		provider:       providerconfig.Provider(config.ProviderDeepSeek),
 		model:          "deepseek-v4-pro",
 		thinkingEffort: "disabled",
 	}
@@ -509,8 +511,8 @@ func TestOpenAICompatibleClient_DeepSeek_ThinkingDisabled(t *testing.T) {
 		}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "test"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "test"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -540,7 +542,7 @@ func TestOpenAICompatibleClient_DeepSeek_ThinkingDisabled(t *testing.T) {
 
 func TestOpenAICompatibleClient_ZAI_ThinkingEnabled(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderZAI),
+		provider:       providerconfig.Provider(config.ProviderZAI),
 		model:          "glm-5.1",
 		thinkingEffort: "enabled",
 	}
@@ -553,8 +555,8 @@ func TestOpenAICompatibleClient_ZAI_ThinkingEnabled(t *testing.T) {
 		}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "test"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "test"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -581,7 +583,7 @@ func TestOpenAICompatibleClient_ZAI_ThinkingEnabled(t *testing.T) {
 
 func TestOpenAICompatibleClient_ZAI_ThinkingDisabled(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderZAI),
+		provider:       providerconfig.Provider(config.ProviderZAI),
 		model:          "glm-5.1",
 		thinkingEffort: "",
 	}
@@ -594,8 +596,8 @@ func TestOpenAICompatibleClient_ZAI_ThinkingDisabled(t *testing.T) {
 		}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "test"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "test"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -613,7 +615,7 @@ func TestOpenAICompatibleClient_ZAI_ThinkingDisabled(t *testing.T) {
 
 func TestOpenAICompatibleClient_OpenCodeGoDeepSeekThinkingEffort(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderOpenCodeGo),
+		provider:       providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:          "deepseek-v4-pro",
 		thinkingEffort: "max",
 	}
@@ -635,7 +637,7 @@ func TestOpenAICompatibleClient_OpenCodeGoDeepSeekThinkingEffort(t *testing.T) {
 
 func TestOpenAICompatibleClient_OpenCodeGoDeepSeekThinkingDisabled(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderOpenCodeGo),
+		provider:       providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:          "deepseek-v4-flash",
 		thinkingEffort: "disabled",
 	}
@@ -657,7 +659,7 @@ func TestOpenAICompatibleClient_OpenCodeGoDeepSeekThinkingDisabled(t *testing.T)
 
 func TestOpenAICompatibleClient_OpenCodeGoGLMThinkingEnabled(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderOpenCodeGo),
+		provider:       providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:          "glm-5.1",
 		thinkingEffort: "enabled",
 	}
@@ -676,7 +678,7 @@ func TestOpenAICompatibleClient_OpenCodeGoGLMThinkingEnabled(t *testing.T) {
 
 func TestOpenAICompatibleClient_OpenCodeGoLongCatThinkingDisabled(t *testing.T) {
 	params := (&OpenAICompatibleClient{
-		provider:       Provider(config.ProviderOpenCodeGo),
+		provider:       providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:          "longcat-2.0",
 		thinkingEffort: "disabled",
 	}).buildChatParams(nil, nil)
@@ -694,7 +696,7 @@ func TestOpenAICompatibleClient_OpenCodeGoReasoningEffortModels(t *testing.T) {
 	for _, model := range []string{"grok-4.5", "glm-5.2", "glm-5.3", "kimi-k3", "hy3", "hy4-preview", "omen-alpha"} {
 		t.Run(model, func(t *testing.T) {
 			params := (&OpenAICompatibleClient{
-				provider:       Provider(config.ProviderOpenCodeGo),
+				provider:       providerconfig.Provider(config.ProviderOpenCodeGo),
 				model:          model,
 				thinkingEffort: "max",
 			}).buildChatParams(nil, nil)
@@ -711,7 +713,7 @@ func TestOpenAICompatibleClient_OpenCodeGoReasoningEffortModels(t *testing.T) {
 
 func TestOpenAICompatibleClient_MoonshotThinkingParameters(t *testing.T) {
 	k3 := (&OpenAICompatibleClient{
-		provider:       Provider(config.ProviderMoonshotAI),
+		provider:       providerconfig.Provider(config.ProviderMoonshotAI),
 		model:          "kimi-k3",
 		thinkingEffort: "high",
 	}).buildChatParams(nil, nil)
@@ -720,7 +722,7 @@ func TestOpenAICompatibleClient_MoonshotThinkingParameters(t *testing.T) {
 	}
 
 	k26 := (&OpenAICompatibleClient{
-		provider:       Provider(config.ProviderMoonshotAI),
+		provider:       providerconfig.Provider(config.ProviderMoonshotAI),
 		model:          "kimi-k2.6",
 		thinkingEffort: "disabled",
 	}).buildChatParams(nil, nil)
@@ -734,7 +736,7 @@ func TestOpenAICompatibleClient_ZAIGLM52AndGLM53ThinkingParameters(t *testing.T)
 	for _, model := range []string{"glm-5.2", "glm-5.3"} {
 		t.Run(model, func(t *testing.T) {
 			params := (&OpenAICompatibleClient{
-				provider:       Provider(config.ProviderZAI),
+				provider:       providerconfig.Provider(config.ProviderZAI),
 				model:          model,
 				thinkingEffort: "max",
 			}).buildChatParams(nil, nil)
@@ -748,7 +750,7 @@ func TestOpenAICompatibleClient_ZAIGLM52AndGLM53ThinkingParameters(t *testing.T)
 
 func TestOpenAICompatibleClient_OpenCodeGoKimiThinkingDisabled(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderOpenCodeGo),
+		provider:       providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:          "kimi-k2.6",
 		thinkingEffort: "disabled",
 	}
@@ -767,7 +769,7 @@ func TestOpenAICompatibleClient_OpenCodeGoKimiThinkingDisabled(t *testing.T) {
 
 func TestOpenAICompatibleClient_OpenCodeGoMiMoOmitsThinkingConfig(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:       Provider(config.ProviderOpenCodeGo),
+		provider:       providerconfig.Provider(config.ProviderOpenCodeGo),
 		model:          "mimo-v2-pro",
 		thinkingEffort: "enabled",
 	}
@@ -780,12 +782,12 @@ func TestOpenAICompatibleClient_OpenCodeGoMiMoOmitsThinkingConfig(t *testing.T) 
 }
 
 func TestToOpenAIMessages_RendersTurnMemoryForAssistant(t *testing.T) {
-	messages := toOpenAIMessages([]Message{
+	messages := toOpenAIMessages([]core.Message{
 		{
-			Role:    RoleAssistant,
+			Role:    core.RoleAssistant,
 			Content: "done",
-			TurnMemory: &TurnMemory{
-				ToolActivity: []HistoricalToolActivity{{Tool: "read_file", Input: map[string]any{"path": "a.go"}, Status: "success"}},
+			TurnMemory: &core.TurnMemory{
+				ToolActivity: []core.HistoricalToolActivity{{Tool: "read_file", Input: map[string]any{"path": "a.go"}, Status: "success"}},
 			},
 		},
 	})
@@ -800,9 +802,9 @@ func TestToOpenAIMessages_RendersTurnMemoryForAssistant(t *testing.T) {
 }
 
 func TestToOpenAIMessagesRetainsAskUserInputAndOutput(t *testing.T) {
-	messages := toOpenAIMessages([]Message{{
-		Role: RoleAssistant,
-		TurnMemory: &TurnMemory{ToolActivity: []HistoricalToolActivity{{
+	messages := toOpenAIMessages([]core.Message{{
+		Role: core.RoleAssistant,
+		TurnMemory: &core.TurnMemory{ToolActivity: []core.HistoricalToolActivity{{
 			Tool:           "ask_user",
 			Input:          map[string]any{"questions": []any{map[string]any{"question": "Database?", "options": []any{"PostgreSQL", "SQLite"}}}},
 			Status:         "success",
@@ -886,39 +888,9 @@ func TestOpenAICompatibleClient_buildAssistantMessage_AttachesReasoningWithoutTo
 	}
 }
 
-func TestIsRetryableError(t *testing.T) {
-	tests := []struct {
-		name      string
-		err       error
-		retryable bool
-	}{
-		{"nil", nil, false},
-		{"context canceled", context.Canceled, false},
-		{"context deadline", context.DeadlineExceeded, false},
-		{"generic error", fmt.Errorf("connection reset"), true},
-		{"429 rate limit", &openai.Error{StatusCode: 429}, true},
-		{"500 server error", &openai.Error{StatusCode: 500}, true},
-		{"502 bad gateway", &openai.Error{StatusCode: 502}, true},
-		{"503 service unavailable", &openai.Error{StatusCode: 503}, true},
-		{"504 gateway timeout", &openai.Error{StatusCode: 504}, true},
-		{"400 bad request", &openai.Error{StatusCode: 400}, false},
-		{"401 unauthorized", &openai.Error{StatusCode: 401}, false},
-		{"403 forbidden", &openai.Error{StatusCode: 403}, false},
-		{"404 not found", &openai.Error{StatusCode: 404}, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isRetryableError(tt.err); got != tt.retryable {
-				t.Errorf("isRetryableError(%v) = %v, want %v", tt.err, got, tt.retryable)
-			}
-		})
-	}
-}
-
 func TestOpenAICompatibleClient_StreamChat_RetriesOnRetryableError(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:   Provider(config.ProviderDeepSeek),
+		provider:   providerconfig.Provider(config.ProviderDeepSeek),
 		model:      "deepseek-chat",
 		maxRetries: 3,
 	}
@@ -934,25 +906,25 @@ func TestOpenAICompatibleClient_StreamChat_RetriesOnRetryableError(t *testing.T)
 		}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "test"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "test"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var retryEvents []StreamEvent
+	var retryEvents []core.StreamEvent
 	var streamed strings.Builder
 	var hasDone bool
 	for ev := range eventCh {
 		switch ev.Type {
-		case StreamEventTypeRetry:
+		case core.StreamEventTypeRetry:
 			retryEvents = append(retryEvents, ev)
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			streamed.WriteString(ev.Content)
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			hasDone = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error event: %v", ev.Error)
 		}
 	}
@@ -976,7 +948,7 @@ func TestOpenAICompatibleClient_StreamChat_RetriesOnRetryableError(t *testing.T)
 
 func TestOpenAICompatibleClient_StreamChat_NoRetryOnNonRetryableError(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider: Provider(config.ProviderDeepSeek),
+		provider: providerconfig.Provider(config.ProviderDeepSeek),
 		model:    "deepseek-chat",
 	}
 
@@ -986,8 +958,8 @@ func TestOpenAICompatibleClient_StreamChat_NoRetryOnNonRetryableError(t *testing
 		return &fakeChatStream{err: &openai.Error{StatusCode: 401}}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "test"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "test"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -997,9 +969,9 @@ func TestOpenAICompatibleClient_StreamChat_NoRetryOnNonRetryableError(t *testing
 	var retryCount int
 	for ev := range eventCh {
 		switch ev.Type {
-		case StreamEventTypeRetry:
+		case core.StreamEventTypeRetry:
 			retryCount++
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			hasError = true
 		}
 	}
@@ -1017,7 +989,7 @@ func TestOpenAICompatibleClient_StreamChat_NoRetryOnNonRetryableError(t *testing
 
 func TestOpenAICompatibleClient_PendingState_ErrorMidLoop(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:   Provider(config.ProviderDeepSeek),
+		provider:   providerconfig.Provider(config.ProviderDeepSeek),
 		model:      "deepseek-chat",
 		maxRetries: 1,
 	}
@@ -1036,8 +1008,8 @@ func TestOpenAICompatibleClient_PendingState_ErrorMidLoop(t *testing.T) {
 		t.Fatalf("register tool: %v", err)
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1046,11 +1018,11 @@ func TestOpenAICompatibleClient_PendingState_ErrorMidLoop(t *testing.T) {
 	var hasIncomplete bool
 	var incompleteErr error
 	for ev := range eventCh {
-		if ev.Type == StreamEventTypeIncomplete {
+		if ev.Type == core.StreamEventTypeIncomplete {
 			hasIncomplete = true
 			incompleteErr = ev.Error
 		}
-		if ev.Type == StreamEventTypeError {
+		if ev.Type == core.StreamEventTypeError {
 			t.Fatalf("expected incomplete, got error: %v", ev.Error)
 		}
 	}
@@ -1068,7 +1040,7 @@ func TestOpenAICompatibleClient_PendingState_ErrorMidLoop(t *testing.T) {
 
 func TestOpenAICompatibleClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:   Provider(config.ProviderDeepSeek),
+		provider:   providerconfig.Provider(config.ProviderDeepSeek),
 		model:      "deepseek-chat",
 		maxRetries: 1,
 	}
@@ -1091,8 +1063,8 @@ func TestOpenAICompatibleClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	}
 
 	// First call: tool call succeeds, then API error on second iteration
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1113,9 +1085,9 @@ func TestOpenAICompatibleClient_PendingState_InjectedOnNextCall(t *testing.T) {
 		return origStreamImpl(ctx, params, opts...)
 	}
 
-	eventCh, err = client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
-		{Role: RoleUser, Content: "continue"},
+	eventCh, err = client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1125,11 +1097,11 @@ func TestOpenAICompatibleClient_PendingState_InjectedOnNextCall(t *testing.T) {
 	var streamed strings.Builder
 	for ev := range eventCh {
 		switch ev.Type {
-		case StreamEventTypeDone:
+		case core.StreamEventTypeDone:
 			hasDone = true
-		case StreamEventTypeChunk:
+		case core.StreamEventTypeChunk:
 			streamed.WriteString(ev.Content)
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("unexpected error: %v", ev.Error)
 		}
 	}
@@ -1153,7 +1125,7 @@ func TestOpenAICompatibleClient_PendingState_InjectedOnNextCall(t *testing.T) {
 
 func TestOpenAICompatibleClient_PendingState_PreservedWhenRecoveryFailsBeforeProgress(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:   Provider(config.ProviderDeepSeek),
+		provider:   providerconfig.Provider(config.ProviderDeepSeek),
 		model:      "deepseek-chat",
 		maxRetries: 1,
 		pendingState: []openai.ChatCompletionMessageParamUnion{
@@ -1171,9 +1143,9 @@ func TestOpenAICompatibleClient_PendingState_PreservedWhenRecoveryFailsBeforePro
 		return &fakeChatStream{err: &openai.Error{StatusCode: 500}}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
-		{Role: RoleUser, Content: "continue"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1182,9 +1154,9 @@ func TestOpenAICompatibleClient_PendingState_PreservedWhenRecoveryFailsBeforePro
 	var hasIncomplete bool
 	for ev := range eventCh {
 		switch ev.Type {
-		case StreamEventTypeIncomplete:
+		case core.StreamEventTypeIncomplete:
 			hasIncomplete = true
-		case StreamEventTypeError:
+		case core.StreamEventTypeError:
 			t.Fatalf("expected incomplete, got error: %v", ev.Error)
 		}
 	}
@@ -1204,7 +1176,7 @@ func TestOpenAICompatibleClient_PendingState_PreservedWhenRecoveryFailsBeforePro
 
 func TestOpenAICompatibleClient_PendingState_NoAccumulation_EmitsError(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider: Provider(config.ProviderDeepSeek),
+		provider: providerconfig.Provider(config.ProviderDeepSeek),
 		model:    "deepseek-chat",
 	}
 
@@ -1212,8 +1184,8 @@ func TestOpenAICompatibleClient_PendingState_NoAccumulation_EmitsError(t *testin
 		return &fakeChatStream{err: &openai.Error{StatusCode: 401}}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "test"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "test"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1221,10 +1193,10 @@ func TestOpenAICompatibleClient_PendingState_NoAccumulation_EmitsError(t *testin
 
 	var hasError bool
 	for ev := range eventCh {
-		if ev.Type == StreamEventTypeError {
+		if ev.Type == core.StreamEventTypeError {
 			hasError = true
 		}
-		if ev.Type == StreamEventTypeIncomplete {
+		if ev.Type == core.StreamEventTypeIncomplete {
 			t.Fatal("expected error, not incomplete")
 		}
 	}
@@ -1239,7 +1211,7 @@ func TestOpenAICompatibleClient_PendingState_NoAccumulation_EmitsError(t *testin
 
 func TestOpenAICompatibleClient_PendingState_EmptyResponseMidLoop(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider:   Provider(config.ProviderDeepSeek),
+		provider:   providerconfig.Provider(config.ProviderDeepSeek),
 		model:      "deepseek-chat",
 		maxRetries: 1,
 	}
@@ -1258,8 +1230,8 @@ func TestOpenAICompatibleClient_PendingState_EmptyResponseMidLoop(t *testing.T) 
 		t.Fatalf("register tool: %v", err)
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "read go.mod"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "read go.mod"},
 	}, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1267,7 +1239,7 @@ func TestOpenAICompatibleClient_PendingState_EmptyResponseMidLoop(t *testing.T) 
 
 	var hasIncomplete bool
 	for ev := range eventCh {
-		if ev.Type == StreamEventTypeIncomplete {
+		if ev.Type == core.StreamEventTypeIncomplete {
 			hasIncomplete = true
 		}
 	}
@@ -1282,7 +1254,7 @@ func TestOpenAICompatibleClient_PendingState_EmptyResponseMidLoop(t *testing.T) 
 
 func TestOpenAICompatibleClient_PendingState_ClearedOnSuccess(t *testing.T) {
 	client := &OpenAICompatibleClient{
-		provider: Provider(config.ProviderDeepSeek),
+		provider: providerconfig.Provider(config.ProviderDeepSeek),
 		model:    "deepseek-chat",
 		pendingState: []openai.ChatCompletionMessageParamUnion{
 			openai.ToolMessage("old result", "call_old"),
@@ -1293,9 +1265,9 @@ func TestOpenAICompatibleClient_PendingState_ClearedOnSuccess(t *testing.T) {
 		return &fakeChatStream{chunks: []openai.ChatCompletionChunk{makeContentChunk("hello")}}
 	}
 
-	eventCh, err := client.StreamChat(context.Background(), []Message{
-		{Role: RoleUser, Content: "original"},
-		{Role: RoleUser, Content: "continue"},
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleUser, Content: "original"},
+		{Role: core.RoleUser, Content: "continue"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1303,7 +1275,7 @@ func TestOpenAICompatibleClient_PendingState_ClearedOnSuccess(t *testing.T) {
 
 	var hasDone bool
 	for ev := range eventCh {
-		if ev.Type == StreamEventTypeDone {
+		if ev.Type == core.StreamEventTypeDone {
 			hasDone = true
 		}
 	}
