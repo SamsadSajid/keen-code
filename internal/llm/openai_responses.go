@@ -151,6 +151,7 @@ func (c *OpenAIResponsesClient) compactHistory(
 	replayedPendingInput *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	eventCh chan<- core.StreamEvent,
 ) error {
 	if streamOpts.OneShot || streamOpts.DisableAutoCompaction || len(*replayedPendingInput) > 0 {
@@ -159,7 +160,7 @@ func (c *OpenAIResponsesClient) compactHistory(
 
 	childCtx, cancel := context.WithCancel(ctx)
 	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionStarted, AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel}}
-	replacement, usage, err := AutoCompact(childCtx, c, *compactionHistory, streamOpts.SessionID)
+	replacement, usage, err := AutoCompact(childCtx, c, *compactionHistory, toolRegistry, streamOpts.SessionID)
 	cancel()
 	if err != nil {
 		eventType := core.StreamEventTypeAutoCompactionFailed
@@ -186,6 +187,7 @@ func (c *OpenAIResponsesClient) proactivelyCompactHistory(
 	replayedPendingInput *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
 	eventCh chan<- core.StreamEvent,
@@ -195,7 +197,7 @@ func (c *OpenAIResponsesClient) proactivelyCompactHistory(
 		return nil
 	}
 
-	return c.compactHistory(ctx, compactionHistory, input, replayedPendingInput, turnStartLen, streamOpts, eventCh)
+	return c.compactHistory(ctx, compactionHistory, input, replayedPendingInput, turnStartLen, streamOpts, toolRegistry, eventCh)
 }
 
 func (c *OpenAIResponsesClient) reduceContextOrCompact(
@@ -205,6 +207,7 @@ func (c *OpenAIResponsesClient) reduceContextOrCompact(
 	replayedPendingInput *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	forcedRecoveryUsed bool,
 	eventCh chan<- core.StreamEvent,
 ) ([]responses.ResponseInputItemUnionParam, bool, error) {
@@ -217,7 +220,7 @@ func (c *OpenAIResponsesClient) reduceContextOrCompact(
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || forcedRecoveryUsed {
 		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
-	if err := c.compactHistory(ctx, compactionHistory, input, replayedPendingInput, turnStartLen, streamOpts, eventCh); err != nil {
+	if err := c.compactHistory(ctx, compactionHistory, input, replayedPendingInput, turnStartLen, streamOpts, toolRegistry, eventCh); err != nil {
 		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
@@ -252,14 +255,14 @@ func (c *OpenAIResponsesClient) StreamChat(
 		for range maxToolTurns {
 			if err := c.proactivelyCompactHistory(
 				ctx, &compactionHistory, &input, &replayedPendingInput, &turnStartLen,
-				streamOpts, hasNewToolTurns, autoCompactOff, eventCh,
+				streamOpts, toolRegistry, hasNewToolTurns, autoCompactOff, eventCh,
 			); err != nil {
 				autoCompactOff = true
 			}
 
 			reducedInput, compactionAttempted, err := c.reduceContextOrCompact(
 				ctx, &compactionHistory, &input, &replayedPendingInput, &turnStartLen,
-				streamOpts, forcedRecoveryUsed, eventCh,
+				streamOpts, toolRegistry, forcedRecoveryUsed, eventCh,
 			)
 			if err != nil {
 				if compactionAttempted {
@@ -333,7 +336,11 @@ func (c *OpenAIResponsesClient) StreamChat(
 			}
 
 			input = append(input, responseOutputInputs(completed.Output, toolCalls, streamedContent)...)
-			toolResults, activities := c.executeTools(ctx, toolCalls, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolResults, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)
 			input = append(input, toolResults...)
 			compactionHistory = append(compactionHistory, core.Message{
 				Role:       core.RoleAssistant,

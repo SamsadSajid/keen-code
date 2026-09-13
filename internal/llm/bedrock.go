@@ -192,10 +192,7 @@ func bedrockCachePoint() brtypes.CachePointBlock {
 	return brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}
 }
 
-func applyBedrockPromptCaching(system []brtypes.SystemContentBlock, toolConfig *brtypes.ToolConfiguration, oneShot bool) []brtypes.SystemContentBlock {
-	if oneShot {
-		return system
-	}
+func applyBedrockPromptCaching(system []brtypes.SystemContentBlock, toolConfig *brtypes.ToolConfiguration) []brtypes.SystemContentBlock {
 	if len(system) > 0 {
 		system = append(system, &brtypes.SystemContentBlockMemberCachePoint{Value: bedrockCachePoint()})
 	}
@@ -205,9 +202,9 @@ func applyBedrockPromptCaching(system []brtypes.SystemContentBlock, toolConfig *
 	return system
 }
 
-func applyBedrockMessageCaching(messages []brtypes.Message, stableMessageCount int, oneShot bool) []brtypes.Message {
+func applyBedrockMessageCaching(messages []brtypes.Message, stableMessageCount int) []brtypes.Message {
 	result := append([]brtypes.Message(nil), messages...)
-	if oneShot || len(result) == 0 {
+	if len(result) == 0 {
 		return result
 	}
 
@@ -282,14 +279,14 @@ func (c *BedrockClient) StreamChat(
 		for range maxToolTurns {
 			if err := c.proactivelyCompactHistory(
 				ctx, &compactionHistory, &msgParams, &injectedPending, &turnStartLen,
-				streamOpts, hasNewToolTurns, autoCompactOff, eventCh,
+				streamOpts, toolRegistry, hasNewToolTurns, autoCompactOff, eventCh,
 			); err != nil {
 				autoCompactOff = true
 			}
 
 			reducedMessages, compactionAttempted, err := c.reduceContextOrCompact(
 				ctx, &compactionHistory, &msgParams, &injectedPending, &turnStartLen,
-				streamOpts, forcedRecoveryUsed, eventCh,
+				streamOpts, toolRegistry, forcedRecoveryUsed, eventCh,
 			)
 			if err != nil {
 				if compactionAttempted {
@@ -308,8 +305,8 @@ func (c *BedrockClient) StreamChat(
 
 			turnToolConfig := cloneBedrockToolConfig(toolConfig)
 			turnSystem := append([]brtypes.SystemContentBlock(nil), system...)
-			turnSystem = applyBedrockPromptCaching(turnSystem, turnToolConfig, oneShot)
-			turnMessages := applyBedrockMessageCaching(msgParams, turnStartLen, oneShot)
+			turnSystem = applyBedrockPromptCaching(turnSystem, turnToolConfig)
+			turnMessages := applyBedrockMessageCaching(msgParams, turnStartLen)
 
 			params := &bedrockruntime.ConverseStreamInput{
 				ModelId:                      aws.String(c.model),
@@ -352,7 +349,11 @@ func (c *BedrockClient) StreamChat(
 				Role:    brtypes.ConversationRoleAssistant,
 				Content: assistantBlocks,
 			})
-			toolResults, activities := c.executeTools(ctx, toolUses, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolResults, activities := c.executeTools(ctx, toolUses, execRegistry, eventCh)
 			msgParams = append(msgParams, brtypes.Message{Role: brtypes.ConversationRoleUser, Content: toolResults})
 			compactionHistory = append(compactionHistory, core.Message{
 				Role:       core.RoleAssistant,
@@ -376,6 +377,7 @@ func (c *BedrockClient) proactivelyCompactHistory(
 	injectedPending *[]brtypes.Message,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
 	eventCh chan<- core.StreamEvent,
@@ -387,7 +389,7 @@ func (c *BedrockClient) proactivelyCompactHistory(
 		) {
 		return nil
 	}
-	return c.compactHistory(ctx, compactionHistory, msgParams, injectedPending, turnStartLen, streamOpts.SessionID, eventCh)
+	return c.compactHistory(ctx, compactionHistory, msgParams, injectedPending, turnStartLen, toolRegistry, streamOpts.SessionID, eventCh)
 }
 
 func (c *BedrockClient) reduceContextOrCompact(
@@ -397,6 +399,7 @@ func (c *BedrockClient) reduceContextOrCompact(
 	injectedPending *[]brtypes.Message,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	forcedRecoveryUsed bool,
 	eventCh chan<- core.StreamEvent,
 ) ([]brtypes.Message, bool, error) {
@@ -409,7 +412,7 @@ func (c *BedrockClient) reduceContextOrCompact(
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || forcedRecoveryUsed || len(*injectedPending) > 0 {
 		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
-	if err := c.compactHistory(ctx, compactionHistory, msgParams, injectedPending, turnStartLen, streamOpts.SessionID, eventCh); err != nil {
+	if err := c.compactHistory(ctx, compactionHistory, msgParams, injectedPending, turnStartLen, toolRegistry, streamOpts.SessionID, eventCh); err != nil {
 		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
@@ -421,13 +424,14 @@ func (c *BedrockClient) compactHistory(
 	msgParams *[]brtypes.Message,
 	injectedPending *[]brtypes.Message,
 	turnStartLen *int,
+	toolRegistry *tools.Registry,
 	sessionID string,
 	eventCh chan<- core.StreamEvent,
 ) error {
 	compactionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionStarted, AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel}}
-	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, sessionID)
+	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, toolRegistry, sessionID)
 	if err != nil {
 		eventType := core.StreamEventTypeAutoCompactionFailed
 		if compaction.IsCancellation(err) {

@@ -1287,3 +1287,61 @@ func TestOpenAICompatibleClient_PendingState_ClearedOnSuccess(t *testing.T) {
 		t.Fatal("expected pending state to be cleared after successful completion")
 	}
 }
+
+func TestOpenAICompatibleClient_DisableToolCallsRejectsToolUse(t *testing.T) {
+	callCount := 0
+	var seenParams []openai.ChatCompletionNewParams
+
+	client := &OpenAICompatibleClient{
+		provider: providerconfig.Provider(config.ProviderDeepSeek),
+		model:    "deepseek-v4-pro",
+	}
+	client.streamImpl = func(ctx context.Context, params openai.ChatCompletionNewParams, opts ...option.RequestOption) chatStream {
+		callCount++
+		seenParams = append(seenParams, params)
+		if callCount == 1 {
+			return &fakeChatStream{chunks: []openai.ChatCompletionChunk{makeToolCallChunk()}}
+		}
+		return &fakeChatStream{chunks: []openai.ChatCompletionChunk{makeContentChunk("summary from history")}}
+	}
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(&successToolOAI{}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	eventCh, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "summarize"}}, registry, core.StreamOptions{DisableToolCalls: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var toolEnds []core.ToolCall
+	var text string
+	for event := range eventCh {
+		switch event.Type {
+		case core.StreamEventTypeChunk:
+			text += event.Content
+		case core.StreamEventTypeToolEnd:
+			toolEnds = append(toolEnds, *event.ToolCall)
+		case core.StreamEventTypeError:
+			t.Fatalf("unexpected error: %v", event.Error)
+		}
+	}
+
+	if callCount != 2 {
+		t.Fatalf("expected 2 stream calls, got %d", callCount)
+	}
+	if len(toolEnds) != 1 || toolEnds[0].Error != toolCallsDisabledMessage || toolEnds[0].Output != nil {
+		t.Fatalf("expected a rejected tool end without output, got %#v", toolEnds)
+	}
+	if text != "summary from history" {
+		t.Fatalf("expected summary after rejection, got %q", text)
+	}
+	body, err := json.Marshal(seenParams[1])
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	if !strings.Contains(string(body), toolCallsDisabledMessage) {
+		t.Fatalf("expected rejection message in follow-up request, got %s", string(body))
+	}
+}

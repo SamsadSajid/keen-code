@@ -517,14 +517,14 @@ func (c *OpenAICompatibleClient) StreamChat(
 		for range maxToolTurns {
 			if err := c.proactivelyCompactHistory(
 				ctx, &compactionHistory, &oaiMessages, &injectedPending, &turnStartLen,
-				streamOpts, hasNewToolTurns, autoCompactOff, eventCh,
+				streamOpts, toolRegistry, hasNewToolTurns, autoCompactOff, eventCh,
 			); err != nil {
 				autoCompactOff = true
 			}
 
 			reducedMessages, compactionAttempted, err := c.reduceContextOrCompact(
 				ctx, &compactionHistory, &oaiMessages, &injectedPending, &turnStartLen,
-				streamOpts, forcedRecoveryUsed, eventCh,
+				streamOpts, toolRegistry, forcedRecoveryUsed, eventCh,
 			)
 			if err != nil {
 				if compactionAttempted {
@@ -586,7 +586,11 @@ func (c *OpenAICompatibleClient) StreamChat(
 				OfAssistant: &assistant,
 			})
 
-			toolMsgs, activities := c.executeTools(ctx, toolCalls, toolRegistry, eventCh)
+			execRegistry := toolRegistry
+			if streamOpts.DisableToolCalls {
+				execRegistry = denyToolRegistry(toolRegistry)
+			}
+			toolMsgs, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)
 			if len(toolMsgs) > 0 {
 				oaiMessages = append(oaiMessages, toolMsgs...)
 			}
@@ -611,6 +615,7 @@ func (c *OpenAICompatibleClient) proactivelyCompactHistory(
 	injectedPending *[]openai.ChatCompletionMessageParamUnion,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
 	eventCh chan<- core.StreamEvent,
@@ -625,7 +630,7 @@ func (c *OpenAICompatibleClient) proactivelyCompactHistory(
 
 	return c.compactHistory(
 		ctx, compactionHistory, oaiMessages, injectedPending, turnStartLen,
-		streamOpts.SessionID, eventCh,
+		toolRegistry, streamOpts.SessionID, eventCh,
 	)
 }
 
@@ -636,6 +641,7 @@ func (c *OpenAICompatibleClient) reduceContextOrCompact(
 	injectedPending *[]openai.ChatCompletionMessageParamUnion,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	forcedRecoveryUsed bool,
 	eventCh chan<- core.StreamEvent,
 ) ([]openai.ChatCompletionMessageParamUnion, bool, error) {
@@ -648,7 +654,7 @@ func (c *OpenAICompatibleClient) reduceContextOrCompact(
 	}
 	if err := c.compactHistory(
 		ctx, compactionHistory, oaiMessages, injectedPending, turnStartLen,
-		streamOpts.SessionID, eventCh,
+		toolRegistry, streamOpts.SessionID, eventCh,
 	); err != nil {
 		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
@@ -661,10 +667,11 @@ func (c *OpenAICompatibleClient) compactHistory(
 	oaiMessages *[]openai.ChatCompletionMessageParamUnion,
 	injectedPending *[]openai.ChatCompletionMessageParamUnion,
 	turnStartLen *int,
+	toolRegistry *tools.Registry,
 	sessionID string,
 	eventCh chan<- core.StreamEvent,
 ) error {
-	replacement, _, err := c.autoCompact(ctx, *compactionHistory, sessionID, eventCh)
+	replacement, _, err := c.autoCompact(ctx, *compactionHistory, toolRegistry, sessionID, eventCh)
 	if err != nil {
 		return err
 	}
@@ -677,14 +684,14 @@ func (c *OpenAICompatibleClient) compactHistory(
 	return nil
 }
 
-func (c *OpenAICompatibleClient) autoCompact(ctx context.Context, history []core.Message, sessionID string, eventCh chan<- core.StreamEvent) ([]core.Message, bool, error) {
+func (c *OpenAICompatibleClient) autoCompact(ctx context.Context, history []core.Message, toolRegistry *tools.Registry, sessionID string, eventCh chan<- core.StreamEvent) ([]core.Message, bool, error) {
 	compactionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	eventCh <- core.StreamEvent{
 		Type:           core.StreamEventTypeAutoCompactionStarted,
 		AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel},
 	}
-	replacement, usage, err := AutoCompact(compactionCtx, c, history, sessionID)
+	replacement, usage, err := AutoCompact(compactionCtx, c, history, toolRegistry, sessionID)
 	if err != nil {
 		eventType := core.StreamEventTypeAutoCompactionFailed
 		if compaction.IsCancellation(err) {

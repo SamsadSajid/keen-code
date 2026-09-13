@@ -174,7 +174,7 @@ func TestBedrockClient_PromptCachingUsesCachePoint(t *testing.T) {
 	}
 }
 
-func TestBedrockClient_OneShotSkipsPromptCaching(t *testing.T) {
+func TestBedrockClient_OneShotUsesPromptCaching(t *testing.T) {
 	var captured *bedrockruntime.ConverseStreamInput
 
 	c := &BedrockClient{model: "global.anthropic.claude-sonnet-4-6"}
@@ -199,20 +199,20 @@ func TestBedrockClient_OneShotSkipsPromptCaching(t *testing.T) {
 	if captured == nil {
 		t.Fatal("expected captured Bedrock request")
 	}
-	if len(captured.System) != 1 {
-		t.Fatalf("expected only system text for oneshot, got %d blocks", len(captured.System))
+	if len(captured.System) != 2 {
+		t.Fatalf("expected system text and cachePoint for oneshot, got %d blocks", len(captured.System))
 	}
-	if _, ok := captured.System[0].(*brtypes.SystemContentBlockMemberText); !ok {
-		t.Fatalf("expected system text block, got %T", captured.System[0])
+	if _, ok := captured.System[1].(*brtypes.SystemContentBlockMemberCachePoint); !ok {
+		t.Fatalf("expected system cachePoint block, got %T", captured.System[1])
 	}
 	if len(captured.Messages) != 1 {
 		t.Fatalf("expected one message, got %d", len(captured.Messages))
 	}
-	if len(captured.Messages[0].Content) != 1 {
-		t.Fatalf("expected only user text for oneshot, got %d blocks", len(captured.Messages[0].Content))
+	if len(captured.Messages[0].Content) != 2 {
+		t.Fatalf("expected user text and cachePoint for oneshot, got %d blocks", len(captured.Messages[0].Content))
 	}
-	if _, ok := captured.Messages[0].Content[0].(*brtypes.ContentBlockMemberText); !ok {
-		t.Fatalf("expected user text block, got %T", captured.Messages[0].Content[0])
+	if _, ok := captured.Messages[0].Content[1].(*brtypes.ContentBlockMemberCachePoint); !ok {
+		t.Fatalf("expected message cachePoint block, got %T", captured.Messages[0].Content[1])
 	}
 }
 

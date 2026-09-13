@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
+
+	"github.com/mochow13/keen-code/internal/llm/core"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mochow13/keen-code/internal/cli/repl/appstate"
@@ -98,6 +99,9 @@ func (m *replModel) handleLLMDone() (replModel, tea.Cmd) {
 func (m *replModel) handleLLMIncomplete(err error) (replModel, tea.Cmd) {
 	m.flushStreamRender()
 	m.clearAskUser()
+	if m.compaction.active && m.compaction.mode != compactionAutomatic {
+		return m.handleCompactionError(err)
+	}
 	segments := cloneStreamSegments(m.stream.handler.segments)
 	m.recordHistoricalToolActivity(segments)
 	partialResponse := m.stream.handler.GetResponse()
@@ -244,10 +248,34 @@ func (m *replModel) handleAutoCompactionStopped() (replModel, tea.Cmd) {
 	return *m, m.waitForAsyncEvent()
 }
 
+func finalAssistantRun(segments []streamSegment) string {
+	start := len(segments)
+	for start > 0 && segments[start-1].kind == segmentAssistant {
+		start--
+	}
+	var content strings.Builder
+	for _, segment := range segments[start:] {
+		content.WriteString(segment.content)
+	}
+	return content.String()
+}
+
+func hasNonTextActivity(segments []streamSegment) bool {
+	for _, segment := range segments {
+		if segment.kind != segmentAssistant && segment.kind != segmentReasoning {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *replModel) handleCompactionDone() (replModel, tea.Cmd) {
 	m.flushStreamRender()
 	segments := cloneStreamSegments(m.stream.handler.segments)
 	responseLines, summary := m.stream.handler.HandleDone()
+	if hasNonTextActivity(segments) {
+		summary = finalAssistantRun(segments)
+	}
 	m.compaction.active = false
 	m.compaction.mode = compactionNone
 	m.stopLoading()

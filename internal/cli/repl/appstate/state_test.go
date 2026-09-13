@@ -16,7 +16,7 @@ import (
 )
 
 type mockLLMClient struct {
-	streamChatFunc func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error)
+	streamChatFunc func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, opts []core.StreamOptions) (<-chan core.StreamEvent, error)
 	resetCount     int
 }
 
@@ -34,7 +34,7 @@ func (d dummyTool) Execute(ctx context.Context, input any) (any, error) { return
 
 func (m *mockLLMClient) StreamChat(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
 	if m.streamChatFunc != nil {
-		return m.streamChatFunc(ctx, messages, toolRegistry)
+		return m.streamChatFunc(ctx, messages, toolRegistry, opts)
 	}
 	ch := make(chan core.StreamEvent)
 	close(ch)
@@ -241,7 +241,7 @@ func TestAppState_StreamChat_WithClient(t *testing.T) {
 	var capturedMessages []core.Message
 
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, _ []core.StreamOptions) (<-chan core.StreamEvent, error) {
 			capturedMessages = append([]core.Message(nil), messages...)
 			ch := make(chan core.StreamEvent)
 			go func() {
@@ -308,7 +308,7 @@ func TestAppState_StreamChatPlanModeUsesPlanPromptAndRemovesWriteTools(t *testin
 	var capturedMessages []core.Message
 	var capturedRegistry *tools.Registry
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, _ []core.StreamOptions) (<-chan core.StreamEvent, error) {
 			capturedMessages = append([]core.Message(nil), messages...)
 			capturedRegistry = toolRegistry
 			ch := make(chan core.StreamEvent)
@@ -362,7 +362,7 @@ func TestAppState_StreamChatPlanModeUsesPlanPromptAndRemovesWriteTools(t *testin
 func TestAppState_StreamChat_ClientError(t *testing.T) {
 	expectedErr := errors.New("stream error")
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, _ []core.StreamOptions) (<-chan core.StreamEvent, error) {
 			return nil, expectedErr
 		},
 	}
@@ -458,11 +458,13 @@ func TestAppState_UpdateClient_ToNil(t *testing.T) {
 func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 	var capturedMessages []core.Message
 	var capturedRegistry *tools.Registry
+	var capturedOpts []core.StreamOptions
 
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, opts []core.StreamOptions) (<-chan core.StreamEvent, error) {
 			capturedMessages = append([]core.Message(nil), messages...)
 			capturedRegistry = toolRegistry
+			capturedOpts = append([]core.StreamOptions(nil), opts...)
 
 			ch := make(chan core.StreamEvent, 2)
 			ch <- core.StreamEvent{Type: core.StreamEventTypeChunk, Content: "compacted summary"}
@@ -487,7 +489,7 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 	eventCh, err := state.StreamCompact(context.Background(), &config.ResolvedConfig{
 		APIKey: "key",
 		Model:  "model",
-	}, "Keep business logic details")
+	}, "Keep business logic details", core.StreamOptions{SessionID: "compact-session"})
 	if err != nil {
 		t.Fatalf("StreamCompact() returned error: %v", err)
 	}
@@ -495,8 +497,11 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 		t.Fatal("expected compaction stream")
 	}
 
-	if capturedRegistry != nil {
-		t.Fatal("expected compaction to disable tools")
+	if capturedRegistry != state.EffectiveToolRegistry() {
+		t.Fatal("expected compaction to reuse the normal tool registry for prompt-cache parity")
+	}
+	if len(capturedOpts) != 1 || !capturedOpts[0].DisableAutoCompaction || !capturedOpts[0].DisableToolCalls || capturedOpts[0].SessionID != "compact-session" {
+		t.Fatalf("expected compaction options to preserve the session ID, disable tool calls, and block nested automatic compaction, got %#v", capturedOpts)
 	}
 	if len(capturedMessages) != len(original)+2 {
 		t.Fatalf("expected %d compaction request messages, got %d", len(original)+2, len(capturedMessages))
@@ -504,8 +509,9 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 	if capturedMessages[0].Role != core.RoleSystem {
 		t.Fatalf("expected first compaction message to be system, got %s", capturedMessages[0].Role)
 	}
-	if !strings.Contains(capturedMessages[0].Content, "Keep business logic details") {
-		t.Fatalf("expected extra prompt in system prompt, got %q", capturedMessages[0].Content)
+	wantSystem := llm.Build(state.WorkingDir(), state.SkillsCatalog(), state.SubagentsCatalog(), state.Mode())
+	if capturedMessages[0].Content != wantSystem {
+		t.Fatalf("expected the normal agent system prompt, got %q", capturedMessages[0].Content)
 	}
 	for i, msg := range original {
 		got := capturedMessages[i+1]
@@ -517,7 +523,7 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 	if last.Role != core.RoleUser {
 		t.Fatalf("expected final compaction message to be user, got %s", last.Role)
 	}
-	if last.Content != compactionUserInstruction {
+	if last.Content != llm.BuildCompactionPrompt("Keep business logic details") {
 		t.Fatalf("unexpected final compaction instruction: %q", last.Content)
 	}
 }
@@ -545,7 +551,7 @@ func TestAppState_StreamBtwBuildsCorrectMessages(t *testing.T) {
 	var capturedRegistry *tools.Registry
 
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry) (<-chan core.StreamEvent, error) {
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, _ []core.StreamOptions) (<-chan core.StreamEvent, error) {
 			capturedMessages = append([]core.Message(nil), messages...)
 			capturedRegistry = toolRegistry
 
@@ -726,7 +732,7 @@ func TestAppState_StreamCompactLeavesMessagesUntouchedOnCancel(t *testing.T) {
 	eventCh, err := state.StreamCompact(ctx, &config.ResolvedConfig{
 		APIKey: "key",
 		Model:  "model",
-	}, "")
+	}, "", core.StreamOptions{})
 	if err != nil {
 		t.Fatalf("expected nil error from StreamCompact, got %v", err)
 	}
