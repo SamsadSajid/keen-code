@@ -11,18 +11,13 @@ import (
 )
 
 func BuildRequest(history []core.Message, prompt string, automatic bool) ([]core.Message, error) {
-	request := make([]core.Message, 0, len(history)+1)
-	request = append(request, core.Message{Role: core.RoleSystem, Content: prompt})
-	for _, message := range core.CloneMessages(history) {
-		if message.Role != core.RoleSystem {
-			request = append(request, message)
-		}
-	}
+	request := core.CloneMessages(history)
 	if automatic {
 		if _, ok := LatestUserMessage(history); !ok {
 			return nil, fmt.Errorf("automatic compaction requires a user message")
 		}
 	}
+	request = append(request, core.Message{Role: core.RoleUser, Content: prompt})
 	return request, nil
 }
 

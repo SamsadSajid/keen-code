@@ -69,7 +69,7 @@ Completed and remaining work, active progress, and next action.
 Relevant files, commands, errors, and tool results.
 ```
 
-The shared `compactionGuidance` (in `internal/llm/systemprompt.go`) feeds both `llm.BuildCompactionPrompt` (manual; sent as the final user message) and `llm.BuildAutoCompactionPrompt` (automatic; sent as the system prompt). Both frame the request as a context compaction whose reply replaces the conversation history, ask the model never to use tools and to work from the existing conversation history alone, demand exact file paths, commands, identifiers, and error text with no references to the discarded history, and present the sections above as a baseline: extra sections and additional detail are allowed when the conversation calls for them. Manual compaction additionally enforces the no-tools guidance: a tool call the model attempts is rejected with a tool-error result instead of being executed.
+The shared `compactionGuidance` (in `internal/llm/systemprompt.go`) feeds both `llm.BuildCompactionPrompt` (manual) and `llm.BuildAutoCompactionPrompt` (automatic), each sent as the final user message after the normal request history. Both frame the request as a context compaction whose reply replaces the conversation history, ask the model never to use tools and to work from the existing conversation history alone, demand exact file paths, commands, identifiers, and error text with no references to the discarded history, and present the sections above as a baseline: extra sections and additional detail are allowed when the conversation calls for them. Both compaction paths enforce the no-tools guidance: a tool call the model attempts is rejected with a tool-error result instead of being executed.
 
 Automatic summaries additionally:
 
@@ -209,21 +209,23 @@ Reduce old tool results if needed
 
 ### Private compaction request
 
-`llm.AutoCompact` creates a nested request using the same provider client:
+`llm.AutoCompact` creates a nested request using the same provider client. It preserves the current request as a cacheable prefix, appends `BuildAutoCompactionPrompt()` as the final user message, and retains the normal tool registry:
 
 ```go
-client.StreamChat(ctx, request, nil, llm.StreamOptions{
+client.StreamChat(ctx, request, toolRegistry, llm.StreamOptions{
     SessionID:             sessionID,
     OneShot:               true,
     DisableAutoCompaction: true,
+    DisableToolCalls:      true,
 })
 ```
 
 The nested request:
 
-- has no tools;
-- is one-shot;
-- disables automatic compaction to prevent recursive compaction;
+- keeps the normal system prompt, conversation history, and tool definitions for provider prompt-cache parity;
+- appends the compaction instruction as the final user message;
+- is one-shot and disables recursive automatic compaction;
+- rejects attempted tool calls with `Tool calls are disabled during compaction; use the history.` instead of executing them;
 - privately collects only assistant text and usage;
 - rejects an empty summary;
 - does not forward summary chunks, reasoning, or tool events to the parent stream.

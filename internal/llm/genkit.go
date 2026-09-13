@@ -251,14 +251,14 @@ func (c *GenkitClient) StreamChat(
 		for range maxToolTurns {
 			if err := c.proactivelyCompactHistory(
 				ctx, &compactionHistory, &aiMessages, &injectedPending, &turnStartLen,
-				streamOpts, hasNewToolTurns, autoCompactOff, eventCh,
+				streamOpts, toolRegistry, hasNewToolTurns, autoCompactOff, eventCh,
 			); err != nil {
 				autoCompactOff = true
 			}
 
 			reducedMessages, compactionAttempted, err := c.reduceContextOrCompact(
 				ctx, &compactionHistory, &aiMessages, &injectedPending, &turnStartLen,
-				streamOpts, forcedRecoveryUsed, eventCh,
+				streamOpts, toolRegistry, forcedRecoveryUsed, eventCh,
 			)
 			if err != nil {
 				if compactionAttempted {
@@ -353,6 +353,7 @@ func (c *GenkitClient) proactivelyCompactHistory(
 	injectedPending *[]*ai.Message,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
 	eventCh chan<- core.StreamEvent,
@@ -361,7 +362,7 @@ func (c *GenkitClient) proactivelyCompactHistory(
 		!core.ShouldAutoCompact(contextreduce.EstimateGenkit(*aiMessages), core.ContextInputBudget(c.contextWindowTokenCount)) {
 		return nil
 	}
-	return c.compactHistory(ctx, compactionHistory, aiMessages, injectedPending, turnStartLen, streamOpts.SessionID, eventCh)
+	return c.compactHistory(ctx, compactionHistory, aiMessages, injectedPending, turnStartLen, toolRegistry, streamOpts.SessionID, eventCh)
 }
 
 func (c *GenkitClient) reduceContextOrCompact(
@@ -371,6 +372,7 @@ func (c *GenkitClient) reduceContextOrCompact(
 	injectedPending *[]*ai.Message,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	forcedRecoveryUsed bool,
 	eventCh chan<- core.StreamEvent,
 ) ([]*ai.Message, bool, error) {
@@ -383,7 +385,7 @@ func (c *GenkitClient) reduceContextOrCompact(
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || forcedRecoveryUsed || len(*injectedPending) > 0 {
 		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
-	if err := c.compactHistory(ctx, compactionHistory, aiMessages, injectedPending, turnStartLen, streamOpts.SessionID, eventCh); err != nil {
+	if err := c.compactHistory(ctx, compactionHistory, aiMessages, injectedPending, turnStartLen, toolRegistry, streamOpts.SessionID, eventCh); err != nil {
 		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
@@ -395,13 +397,14 @@ func (c *GenkitClient) compactHistory(
 	aiMessages *[]*ai.Message,
 	injectedPending *[]*ai.Message,
 	turnStartLen *int,
+	toolRegistry *tools.Registry,
 	sessionID string,
 	eventCh chan<- core.StreamEvent,
 ) error {
 	compactionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionStarted, AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel}}
-	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, sessionID)
+	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, toolRegistry, sessionID)
 	if err != nil {
 		eventType := core.StreamEventTypeAutoCompactionFailed
 		if compaction.IsCancellation(err) {

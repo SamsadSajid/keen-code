@@ -103,14 +103,14 @@ func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []core.Mess
 		for range maxToolTurns {
 			if err := c.proactivelyCompactHistory(
 				ctx, &compactionHistory, &instructions, &input, &injectedPending, &turnStartLen,
-				streamOpts, hasNewToolTurns, autoCompactOff, eventCh,
+				streamOpts, toolRegistry, hasNewToolTurns, autoCompactOff, eventCh,
 			); err != nil {
 				autoCompactOff = true
 			}
 
 			reducedInput, compactionAttempted, err := c.reduceContextOrCompact(
 				ctx, &compactionHistory, &instructions, &input, &injectedPending, &turnStartLen,
-				streamOpts, forcedRecoveryUsed, eventCh,
+				streamOpts, toolRegistry, forcedRecoveryUsed, eventCh,
 			)
 			if err != nil {
 				if compactionAttempted {
@@ -219,6 +219,7 @@ func (c *OpenAICodexClient) proactivelyCompactHistory(
 	injectedPending *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	hasNewToolTurns bool,
 	autoCompactOff bool,
 	eventCh chan<- core.StreamEvent,
@@ -228,7 +229,7 @@ func (c *OpenAICodexClient) proactivelyCompactHistory(
 		return nil
 	}
 
-	return c.compactHistory(ctx, compactionHistory, instructions, input, injectedPending, turnStartLen, streamOpts.SessionID, eventCh)
+	return c.compactHistory(ctx, compactionHistory, instructions, input, injectedPending, turnStartLen, toolRegistry, streamOpts.SessionID, eventCh)
 }
 
 func (c *OpenAICodexClient) reduceContextOrCompact(
@@ -239,6 +240,7 @@ func (c *OpenAICodexClient) reduceContextOrCompact(
 	injectedPending *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
 	streamOpts core.StreamOptions,
+	toolRegistry *tools.Registry,
 	forcedRecoveryUsed bool,
 	eventCh chan<- core.StreamEvent,
 ) ([]responses.ResponseInputItemUnionParam, bool, error) {
@@ -251,7 +253,7 @@ func (c *OpenAICodexClient) reduceContextOrCompact(
 	if streamOpts.DisableAutoCompaction || streamOpts.OneShot || forcedRecoveryUsed || len(*injectedPending) > 0 {
 		return nil, false, fmt.Errorf("%w: %s", contextreduce.ErrContextWindowExceeded, contextreduce.ContextWindowExceededError)
 	}
-	if err := c.compactHistory(ctx, compactionHistory, instructions, input, injectedPending, turnStartLen, streamOpts.SessionID, eventCh); err != nil {
+	if err := c.compactHistory(ctx, compactionHistory, instructions, input, injectedPending, turnStartLen, toolRegistry, streamOpts.SessionID, eventCh); err != nil {
 		return nil, true, fmt.Errorf("%w: automatic compaction failed: %v", contextreduce.ErrContextWindowExceeded, err)
 	}
 	return nil, true, nil
@@ -264,12 +266,13 @@ func (c *OpenAICodexClient) compactHistory(
 	input *[]responses.ResponseInputItemUnionParam,
 	injectedPending *[]responses.ResponseInputItemUnionParam,
 	turnStartLen *int,
+	toolRegistry *tools.Registry,
 	sessionID string,
 	eventCh chan<- core.StreamEvent,
 ) error {
 	compactionCtx, cancel := context.WithCancel(ctx)
 	eventCh <- core.StreamEvent{Type: core.StreamEventTypeAutoCompactionStarted, AutoCompaction: &core.AutoCompactionEvent{Cancel: cancel}}
-	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, sessionID)
+	replacement, usage, err := AutoCompact(compactionCtx, c, *compactionHistory, toolRegistry, sessionID)
 	cancel()
 	if err != nil {
 		eventType := core.StreamEventTypeAutoCompactionFailed

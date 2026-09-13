@@ -9,7 +9,7 @@ import (
 	"github.com/mochow13/keen-code/internal/llm/core"
 )
 
-func TestBuildRequestExcludesSystemHistory(t *testing.T) {
+func TestBuildRequestPreservesHistoryAndAppendsPrompt(t *testing.T) {
 	history := []core.Message{
 		{Role: core.RoleSystem, Content: "system history"},
 		{Role: core.RoleUser, Content: "task"},
@@ -19,11 +19,11 @@ func TestBuildRequestExcludesSystemHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(request) != 2 || request[0].Role != core.RoleSystem || request[0].Content != "compaction prompt" || request[1].Content != "task" {
+	if len(request) != 3 || request[0].Role != core.RoleSystem || request[0].Content != "system history" || request[1].Content != "task" || request[2].Role != core.RoleUser || request[2].Content != "compaction prompt" {
 		t.Fatalf("unexpected request: %#v", request)
 	}
-	request[1].Content = "changed"
-	if history[1].Content != "task" {
+	request[0].Content = "changed"
+	if history[0].Content != "system history" {
 		t.Fatal("request aliases history")
 	}
 }

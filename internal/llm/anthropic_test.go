@@ -1027,6 +1027,39 @@ func TestAnthropicClient_UsesBlockLevelCacheControl(t *testing.T) {
 	}
 }
 
+func TestAnthropicClient_OneShotUsesBlockLevelCacheControl(t *testing.T) {
+	var capturedParams anthropic.MessageNewParams
+	c := &AnthropicClient{
+		provider: providerconfig.Provider(config.ProviderAnthropic),
+		model:    "claude-sonnet-4-6",
+	}
+	c.streamImpl = func(ctx context.Context, params anthropic.MessageNewParams, opts ...option.RequestOption) anthropicStream {
+		capturedParams = params
+		return &mockAnthropicStream{events: []anthropic.MessageStreamEventUnion{
+			makeTextDeltaEvent(0, "ok"),
+			makeContentBlockStopEvent(0),
+		}}
+	}
+
+	eventCh, err := c.StreamChat(context.Background(), []core.Message{
+		{Role: core.RoleSystem, Content: "system prompt"},
+		{Role: core.RoleUser, Content: "hi"},
+	}, nil, core.StreamOptions{OneShot: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range eventCh {
+	}
+
+	body, err := json.Marshal(capturedParams)
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	if count := strings.Count(string(body), `"cache_control":{"type":"ephemeral"}`); count != 2 {
+		t.Fatalf("expected system and message cache controls for oneshot, got %d in %s", count, string(body))
+	}
+}
+
 func TestAnthropicClient_StripsStaleCacheControl(t *testing.T) {
 	var capturedParams anthropic.MessageNewParams
 
