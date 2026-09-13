@@ -31,7 +31,7 @@ import (
 
 var loadingTexts = []string{
 	"`/btw` asks aside, off the record",
-	"`Shift+Tab` swaps plan ↔ build",
+	"`Shift+Tab` cycles build → plan → yolo",
 	"`/adversary` calls in a critic",
 	"`@file` autocompletes paths",
 	"`Shift+Enter` adds a newline",
@@ -52,7 +52,7 @@ var loadingTexts = []string{
 	"`read_file` tool accepts `offset` & `limit`",
 	"Workdir `bash` auto-approves",
 	"`/adversary model` picks the critic",
-	"`/mode build` exits plan-only mode",
+	"`/mode build` exits plan/yolo modes",
 	"`/skills list` shows everything",
 	"`Tab` swaps input ↔ viewport focus",
 	"Drag selection copies on release",
@@ -435,20 +435,25 @@ func (m *replModel) currentMode() llm.AgentMode {
 }
 
 func (m *replModel) setMode(mode llm.AgentMode) {
-	if mode != llm.ModePlan {
+	if mode != llm.ModePlan && mode != llm.ModeYolo {
 		mode = llm.ModeBuild
 	}
 	m.mode = mode
 	if m.appState != nil {
 		m.appState.SetMode(mode)
 	}
+	if m.permissionRequester != nil {
+		m.permissionRequester.SetYoloMode(mode == llm.ModeYolo)
+	}
 }
-
 func (m *replModel) toggleMode() {
-	if m.currentMode() == llm.ModePlan {
-		m.setMode(llm.ModeBuild)
-	} else {
+	switch m.currentMode() {
+	case llm.ModeBuild:
 		m.setMode(llm.ModePlan)
+	case llm.ModePlan:
+		m.setMode(llm.ModeYolo)
+	default:
+		m.setMode(llm.ModeBuild)
 	}
 	m.updateViewportContent()
 	m.viewport.GotoBottom()
@@ -612,6 +617,8 @@ func renderInputArea(content string, width int, focused bool, shellMode bool, bt
 		ruleStyle = repltheme.AdversaryInputRuleStyle
 	} else if mode == llm.ModePlan {
 		ruleStyle = repltheme.PlanInputRuleStyle
+	} else if mode == llm.ModeYolo {
+		ruleStyle = repltheme.YoloInputRuleStyle
 	}
 
 	switch {
@@ -629,6 +636,8 @@ func renderInputArea(content string, width int, focused bool, shellMode bool, bt
 	chipStyle := repltheme.ModeBuildChipStyle
 	if mode == llm.ModePlan {
 		chipStyle = repltheme.ModePlanChipStyle
+	} else if mode == llm.ModeYolo {
+		chipStyle = repltheme.ModeYoloChipStyle
 	}
 	topRule, bottomRule := renderRulesWithChip(ruleWidth, ruleStyle, string(mode), chipStyle)
 	return topRule + "\n" + content + "\n" + bottomRule

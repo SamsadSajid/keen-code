@@ -121,3 +121,67 @@ func TestSendResponseWithoutPendingRequest(t *testing.T) {
 		t.Fatal("unexpected pending request")
 	}
 }
+
+func TestYoloMode_AllowsWithoutRequest(t *testing.T) {
+	requester := NewRequester(config.NewProjectPermissions())
+	requester.SetYoloMode(true)
+
+	for _, tc := range []struct {
+		name        string
+		toolName    string
+		isDangerous bool
+	}{
+		{"dangerous", "bash", true},
+		{"non-dangerous", "read_file", false},
+	} {
+		allowed, err := requester.RequestPermission(context.Background(), tc.toolName, "path", "", tc.isDangerous)
+		if err != nil {
+			t.Fatalf("%s: RequestPermission() error = %v", tc.name, err)
+		}
+		if !allowed {
+			t.Fatalf("%s: expected yolo mode to allow", tc.name)
+		}
+		if requester.HasPendingRequest() {
+			t.Fatalf("%s: expected no pending request", tc.name)
+		}
+		select {
+		case req := <-requester.GetRequestChan():
+			t.Fatalf("%s: expected no permission request, got %#v", tc.name, req)
+		default:
+		}
+	}
+}
+
+func TestYoloMode_ToggleOffRestoresPrompting(t *testing.T) {
+	requester := NewRequester(config.NewProjectPermissions())
+	requester.SetYoloMode(true)
+
+	allowed, err := requester.RequestPermission(context.Background(), "bash", "rm -rf tmp", "", true)
+	if err != nil || !allowed {
+		t.Fatalf("yolo allowed = %v, %v", allowed, err)
+	}
+
+	requester.SetYoloMode(false)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	resultCh := make(chan bool, 1)
+	go func() {
+		allowed, _ := requester.RequestPermission(ctx, "bash", "rm -rf tmp", "", true)
+		resultCh <- allowed
+	}()
+
+	select {
+	case req := <-requester.GetRequestChan():
+		if req.ToolName != "bash" {
+			t.Errorf("expected tool=bash, got %q", req.ToolName)
+		}
+	case <-resultCh:
+		t.Fatal("expected request on channel before result")
+	}
+
+	cancel()
+	if got := <-resultCh; got {
+		t.Fatal("expected denial after context cancel")
+	}
+}

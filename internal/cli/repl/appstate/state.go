@@ -332,7 +332,7 @@ func (s *AppState) RegisterTool(tool tools.Tool) error {
 }
 
 func (s *AppState) SetMode(mode llm.AgentMode) {
-	if mode != llm.ModePlan {
+	if mode != llm.ModePlan && mode != llm.ModeYolo {
 		mode = llm.ModeBuild
 	}
 	s.mode = mode

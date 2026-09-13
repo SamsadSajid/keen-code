@@ -315,6 +315,19 @@ func TestInitialModel_PlanModeSetsPromptStyle(t *testing.T) {
 	}
 }
 
+func TestInitialModel_YoloModeSetsPromptStyle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := initialModel(&replContext{version: "test", workingDir: t.TempDir(), cfg: &config.ResolvedConfig{}}, nil, false)
+	m.setMode(llm.ModeYolo)
+	view := m.View().Content
+	if !strings.Contains(view, repltheme.ModeYoloChipStyle.Render("yolo")) {
+		t.Fatalf("expected yolo mode chip in view, got %q", view)
+	}
+	if !strings.Contains(view, styleColorPrefix(repltheme.YoloInputRuleStyle)) {
+		t.Fatalf("expected yolo mode prompt to use error color, got %q", view)
+	}
+}
+
 func TestRenderInputArea_UsesViewportWidthRules(t *testing.T) {
 	focusedWide := renderInputArea("▶ hello", 80, true, false, false, false, llm.ModeBuild)
 	blurredWide := renderInputArea("▶ hello", 80, false, false, false, false, llm.ModeBuild)
@@ -680,6 +693,20 @@ func TestRenderInputArea_UsesSecondaryStyleForPlanMode(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], styleColorPrefix(repltheme.PlanInputRuleStyle)) {
 		t.Fatalf("expected plan mode rule to use secondary color, got %q", lines[0])
+	}
+}
+
+func TestRenderInputArea_UsesErrorStyleForYoloMode(t *testing.T) {
+	area := renderInputArea("▶ hello", 80, true, false, false, false, llm.ModeYolo)
+	lines := strings.Split(strings.TrimRight(area, "\n"), "\n")
+	if len(lines) < 1 {
+		t.Fatalf("expected at least 1 line, got %v", lines)
+	}
+	if !strings.Contains(lines[0], repltheme.ModeYoloChipStyle.Render("yolo")) {
+		t.Fatalf("expected yolo mode chip in top rule, got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], styleColorPrefix(repltheme.YoloInputRuleStyle)) {
+		t.Fatalf("expected yolo mode rule to use error color, got %q", lines[0])
 	}
 }
 

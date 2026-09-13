@@ -128,6 +128,18 @@ func TestBuild_BuildIncludesBuildInstructions(t *testing.T) {
 	}
 }
 
+func TestBuild_YoloUsesBuildInstructions(t *testing.T) {
+	yolo := Build(t.TempDir(), "", "", ModeYolo)
+	if !strings.Contains(yolo, "# Active mode: build") {
+		t.Fatalf("expected yolo mode to use build prompt, got %q", yolo)
+	}
+	for _, unexpected := range []string{"# Active mode: yolo", "write_file and edit_file are unavailable", "Read-only mode"} {
+		if strings.Contains(yolo, unexpected) {
+			t.Fatalf("expected %q to be absent from yolo prompt, got %q", unexpected, yolo)
+		}
+	}
+}
+
 func TestBuild_IncludesToolFollowThroughInstructions(t *testing.T) {
 	result := Build(t.TempDir(), "", "", ModeBuild)
 	for _, expected := range []string{

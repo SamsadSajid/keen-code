@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"context"
 	"errors"
 	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
@@ -290,5 +291,85 @@ func TestHandleSessionPersistenceError(t *testing.T) {
 	m.handleSessionPersistenceError(errors.New("disk full"))
 	if got := ansi.Strip(m.output.Join()); !strings.Contains(got, "Session persistence failed: disk full") {
 		t.Fatalf("unexpected persistence error output %q", got)
+	}
+}
+
+func TestSetModeYoloSyncsAppStateAndRequester(t *testing.T) {
+	m := newTestModel()
+	m.setMode(llm.ModeYolo)
+	if got := m.currentMode(); got != llm.ModeYolo {
+		t.Fatalf("currentMode() = %q, want yolo", got)
+	}
+	if got := m.appState.Mode(); got != llm.ModeYolo {
+		t.Fatalf("appState.Mode() = %q, want yolo", got)
+	}
+	allowed, err := m.permissionRequester.RequestPermission(context.Background(), "bash", "rm -rf /tmp/x", "", true)
+	if err != nil || !allowed {
+		t.Fatalf("yolo RequestPermission() = (%v, %v), want (true, nil)", allowed, err)
+	}
+	if m.permissionRequester.HasPendingRequest() {
+		t.Fatal("yolo mode created a pending permission request")
+	}
+	select {
+	case req := <-m.permissionRequester.GetRequestChan():
+		t.Fatalf("yolo mode sent a permission request: %#v", req)
+	default:
+	}
+
+	m.setMode(llm.ModeBuild)
+	if got := m.appState.Mode(); got != llm.ModeBuild {
+		t.Fatalf("appState.Mode() = %q, want build", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan bool, 1)
+	go func() {
+		allowed, _ := m.permissionRequester.RequestPermission(ctx, "bash", "rm -rf /tmp/x", "", true)
+		resultCh <- allowed
+	}()
+	select {
+	case req := <-m.permissionRequester.GetRequestChan():
+		if req.ToolName != "bash" {
+			t.Errorf("expected tool=bash, got %q", req.ToolName)
+		}
+	case got := <-resultCh:
+		t.Fatalf("expected a permission prompt, got result %v", got)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for permission prompt after leaving yolo")
+	}
+	cancel()
+	<-resultCh
+
+	m.setMode(llm.AgentMode("unknown"))
+	if got := m.currentMode(); got != llm.ModeBuild {
+		t.Fatalf("currentMode() = %q, want build for unknown mode", got)
+	}
+	if got := m.appState.Mode(); got != llm.ModeBuild {
+		t.Fatalf("appState.Mode() = %q, want build for unknown mode", got)
+	}
+}
+
+func TestToggleModeCyclesBuildPlanYolo(t *testing.T) {
+	m := newTestModel()
+	want := []llm.AgentMode{llm.ModePlan, llm.ModeYolo, llm.ModeBuild}
+	for _, mode := range want {
+		m.toggleMode()
+		if got := m.currentMode(); got != mode {
+			t.Fatalf("toggleMode() = %q, want %q", got, mode)
+		}
+		if got := m.appState.Mode(); got != mode {
+			t.Fatalf("appState.Mode() = %q, want %q", got, mode)
+		}
+		if mode == llm.ModeYolo {
+			allowed, err := m.permissionRequester.RequestPermission(context.Background(), "bash", "rm -rf /tmp/x", "", true)
+			if err != nil || !allowed {
+				t.Fatalf("yolo RequestPermission() = (%v, %v), want (true, nil)", allowed, err)
+			}
+			if m.permissionRequester.HasPendingRequest() {
+				t.Fatal("yolo mode created a pending permission request")
+			}
+		}
+	}
+	if m.permissionRequester.HasPendingRequest() {
+		t.Fatal("unexpected pending request after toggle cycle")
 	}
 }

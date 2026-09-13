@@ -876,6 +876,8 @@ func (m replModel) View() tea.View {
 			styles.Focused.Prompt = repltheme.AdversaryPromptStyle
 		case m.currentMode() == llm.ModePlan:
 			styles.Focused.Prompt = repltheme.PromptPlanStyle
+		case m.currentMode() == llm.ModeYolo:
+			styles.Focused.Prompt = repltheme.PromptYoloStyle
 		default:
 			styles.Focused.Prompt = repltheme.PromptStyle
 		}

@@ -228,7 +228,12 @@ Users can pre-allow specific tools for the current project via the `/allow-permi
 
 The lookup order inside `RequestPermission` is:
 
-1. `autoApprove` (headless mode) → grant
-2. project `allow` list → grant
-3. session-allowed tools (non-dangerous only) → grant
-4. prompt the user
+1. yolo mode (`/mode yolo`) → grant without prompting
+2. `autoApprove` (headless mode) → grant
+3. project `allow` list → grant
+4. session-allowed tools (non-dangerous only) → grant
+5. prompt the user
+
+## Yolo Mode
+
+Yolo mode (`/mode yolo`) sets a per-mode flag on the interactive `Requester` so `RequestPermission` returns `(true, nil)` immediately, before the project/session/prompt logic — skipping all interactive prompts, including the dangerous-`bash` prompt. It is separate from headless `autoApprove` (`NewAutoApproveRequester`): leaving yolo mode (`/mode build`) restores normal prompting. Yolo has the full build tool registry (no plan-style tool stripping). Like `/allow-permission`, yolo skips prompts only: a `Guard` `PermissionDenied` verdict (blocked system paths, `.gitignore`, home dotfiles) still denies the operation.

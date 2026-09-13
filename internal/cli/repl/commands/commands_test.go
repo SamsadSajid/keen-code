@@ -38,3 +38,24 @@ func TestIsKnownCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestYoloCommandRemoved(t *testing.T) {
+	for _, cmd := range All {
+		if cmd.Name == "/yolo" {
+			t.Fatalf("unexpected /yolo in All")
+		}
+	}
+	for _, cmd := range Suggestions {
+		if cmd.Name == "/yolo" {
+			t.Fatalf("unexpected /yolo in Suggestions")
+		}
+	}
+	if IsKnownCommand("/yolo") {
+		t.Fatal("expected IsKnownCommand(/yolo) = false")
+	}
+	for _, result := range Filter("/yolo") {
+		if result.Name == "/yolo" {
+			t.Fatalf("unexpected /yolo suggestion, got %#v", result)
+		}
+	}
+}

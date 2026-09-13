@@ -2174,7 +2174,8 @@ func TestHandleModeCommandCoversStatusChangesAndValidation(t *testing.T) {
 		{input: replcommands.Mode, wantMode: llm.ModeBuild, wantText: "Mode: build"},
 		{input: replcommands.Mode + " plan", wantMode: llm.ModePlan},
 		{input: replcommands.Mode + " build", wantMode: llm.ModeBuild},
-		{input: replcommands.Mode + " invalid", wantMode: llm.ModeBuild, wantText: "Usage: /mode plan|build"},
+		{input: replcommands.Mode + " yolo", wantMode: llm.ModeYolo},
+		{input: replcommands.Mode + " invalid", wantMode: llm.ModeBuild, wantText: "Usage: /mode plan|build|yolo"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -2187,6 +2188,36 @@ func TestHandleModeCommandCoversStatusChangesAndValidation(t *testing.T) {
 				t.Fatalf("output %q missing %q", result.output.Join(), tt.wantText)
 			}
 		})
+	}
+}
+
+func TestDispatchCommandYoloRemoved(t *testing.T) {
+	m := newTestModel()
+	_, _, handled := m.dispatchCommand("/yolo")
+	if handled {
+		t.Fatal("expected /yolo to not be handled by dispatchCommand")
+	}
+}
+
+func TestHandleModeCommandInvalidKeepsMode(t *testing.T) {
+	m := newTestModel()
+	m.setMode(llm.ModePlan)
+	result := m.handleModeCommand(replcommands.Mode + " invalid")
+	if result.currentMode() != llm.ModePlan {
+		t.Fatalf("mode = %q, want plan to be preserved", result.currentMode())
+	}
+	if !strings.Contains(ansi.Strip(result.output.Join()), "Usage: /mode plan|build|yolo") {
+		t.Fatalf("output %q missing usage", result.output.Join())
+	}
+}
+
+func TestGetHelpTextOmitsYoloCommand(t *testing.T) {
+	text := ansi.Strip(getHelpText(80))
+	if strings.Contains(text, "/yolo") {
+		t.Fatalf("help text should not list /yolo: %q", text)
+	}
+	if !strings.Contains(text, "/mode") {
+		t.Fatalf("help text missing /mode: %q", text)
 	}
 }
 
@@ -2293,6 +2324,53 @@ func TestHandleClearCommandPreservesModeAndResetsState(t *testing.T) {
 	output := ansi.Strip(result.output.Join())
 	if !strings.Contains(output, "Mode restored: plan") || !strings.Contains(output, "New session started") {
 		t.Fatalf("unexpected clear output %q", output)
+	}
+}
+
+func TestHandleClearCommandPreservesYolo(t *testing.T) {
+	m := newTestModel()
+	m.ctx.workingDir = t.TempDir()
+	m.setMode(llm.ModeYolo)
+	m.appState.AddMessage(core.RoleUser, "message")
+
+	result := m.handleClearCommand()
+	if result.currentMode() != llm.ModeYolo {
+		t.Fatalf("clear result mode=%q, want yolo", result.currentMode())
+	}
+	if result.appState.Mode() != llm.ModeYolo {
+		t.Fatalf("clear result appState mode=%q, want yolo", result.appState.Mode())
+	}
+	if len(result.appState.GetMessages()) != 0 {
+		t.Fatalf("clear did not reset messages: %#v", result.appState.GetMessages())
+	}
+	allowed, err := result.permissionRequester.RequestPermission(context.Background(), "bash", "rm -rf /tmp/x", "", true)
+	if err != nil || !allowed {
+		t.Fatalf("clear result RequestPermission() = (%v, %v), want (true, nil)", allowed, err)
+	}
+	if result.permissionRequester.HasPendingRequest() {
+		t.Fatal("clear result created a pending permission request in yolo mode")
+	}
+	output := ansi.Strip(result.output.Join())
+	if !strings.Contains(output, "Mode restored: yolo") || !strings.Contains(output, "New session started") {
+		t.Fatalf("unexpected clear output %q", output)
+	}
+}
+
+func TestHandleNewCommandPreservesYolo(t *testing.T) {
+	m := newTestModel()
+	m.ctx.workingDir = t.TempDir()
+	m.setMode(llm.ModeYolo)
+	m.textarea.SetValue("/new")
+	newM, _ := m.handleEnterKey()
+	if newM.currentMode() != llm.ModeYolo {
+		t.Fatalf("/new result mode=%q, want yolo", newM.currentMode())
+	}
+	if newM.appState.Mode() != llm.ModeYolo {
+		t.Fatalf("/new result appState mode=%q, want yolo", newM.appState.Mode())
+	}
+	allowed, err := newM.permissionRequester.RequestPermission(context.Background(), "bash", "rm -rf /tmp/x", "", true)
+	if err != nil || !allowed {
+		t.Fatalf("/new result RequestPermission() = (%v, %v), want (true, nil)", allowed, err)
 	}
 }
 

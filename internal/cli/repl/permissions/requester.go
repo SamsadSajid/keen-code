@@ -39,6 +39,7 @@ type Requester struct {
 	pending             *Request
 	sessionAllowedTools map[string]bool
 	autoApprove         bool
+	yoloMode            bool
 	projectPerms        *config.ProjectPermissions
 }
 
@@ -56,7 +57,14 @@ func NewAutoApproveRequester() *Requester {
 	return r
 }
 
+func (r *Requester) SetYoloMode(enabled bool) {
+	r.yoloMode = enabled
+}
+
 func (r *Requester) RequestPermission(ctx context.Context, toolName, path, resolvedPath string, isDangerous bool) (bool, error) {
+	if r.yoloMode {
+		return true, nil
+	}
 	if r.autoApprove {
 		return true, nil
 	}

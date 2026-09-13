@@ -134,6 +134,7 @@ var (
 	BtwInputRuleStyle       = lipgloss.NewStyle().Foreground(AccentColor).Faint(true)
 	AdversaryInputRuleStyle = lipgloss.NewStyle().Foreground(SecondaryColor).Faint(true)
 	PlanInputRuleStyle      = lipgloss.NewStyle().Foreground(SecondaryColor).Faint(true)
+	YoloInputRuleStyle      = lipgloss.NewStyle().Foreground(ErrorColor).Faint(true)
 	UserInputBlockStyle     = lipgloss.NewStyle().
 				Background(UserInputBlockBackground).
 				Padding(1, 1)
@@ -233,10 +234,16 @@ var (
 
 	ModeBuildChipStyle = lipgloss.NewStyle().Background(PrimaryColor).Foreground(WhiteColor).Bold(true).Padding(0, 1)
 	ModePlanChipStyle  = lipgloss.NewStyle().Background(SecondaryColor).Foreground(BlackColor).Bold(true).Padding(0, 1)
+	ModeYoloChipStyle  = lipgloss.NewStyle().Background(ErrorColor).Foreground(WhiteColor).Bold(true).Padding(0, 1)
 
 	InputRulePlanStyle = lipgloss.NewStyle().Foreground(SecondaryColor)
+	InputRuleYoloStyle = lipgloss.NewStyle().Foreground(ErrorColor)
 	PromptPlanStyle    = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(SecondaryColor).
 				MarginTop(2)
+	PromptYoloStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ErrorColor).
+			MarginTop(2)
 )

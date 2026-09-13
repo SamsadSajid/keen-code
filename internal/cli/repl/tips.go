@@ -4,7 +4,7 @@ import "math/rand"
 
 var tips = []string{
 	"Use `/btw <question>` to ask a quick side question without adding it to the conversation history.",
-	"Press Shift+Tab to toggle between plan and build modes instantly.",
+	"Press Shift+Tab to cycle between build, plan, and yolo modes instantly.",
 	"Use `/adversary` to run a second AI as a critic — it reviews your conversation for bugs, security issues, and faulty assumptions.",
 	"Type `@` followed by a filename fragment to get autocomplete — the resolved path is inserted directly into your prompt.",
 	"Press Shift+Enter to add a new line in the input without submitting.",
@@ -23,7 +23,7 @@ var tips = []string{
 	"The `read_file` tool supports `offset` and `limit` so the model can read specific line ranges of large files.",
 	"Bash commands are auto-approved — only dangerous ones like `rm` or `git push` trigger a prompt.",
 	"`/adversary model` configures a separate model just for adversarial review, independent of your main model.",
-	"In plan mode the model cannot make file changes — it must describe the plan first. Switch with `/mode build` when ready.",
+	"In plan mode the model cannot make file changes — it must describe the plan first. Switch with `/mode build` when ready; `/mode yolo` skips all permission prompts.",
 	"`/skills list` shows all available skills including ones auto-generated from connected MCP servers.",
 	"Press Tab to move focus between the input box and the output viewport for keyboard scrolling.",
 	"Drag to select text in the output or input — it copies automatically when you release the mouse.",

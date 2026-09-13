@@ -826,3 +826,44 @@ func TestAppState_SkillConfigAndSuggestionsAreIndependent(t *testing.T) {
 		t.Fatalf("SkillSuggestions() = %#v", suggestions)
 	}
 }
+
+func TestAppState_SetModeYoloRoundTrips(t *testing.T) {
+	state := New(nil, t.TempDir())
+	state.SetMode(llm.ModeYolo)
+	if state.Mode() != llm.ModeYolo {
+		t.Fatalf("yolo mode = %q, want yolo", state.Mode())
+	}
+	state.SetMode(llm.ModePlan)
+	if state.Mode() != llm.ModePlan {
+		t.Fatalf("plan mode = %q, want plan", state.Mode())
+	}
+	state.SetMode(llm.ModeBuild)
+	if state.Mode() != llm.ModeBuild {
+		t.Fatalf("build mode = %q, want build", state.Mode())
+	}
+	state.SetMode(llm.AgentMode("invalid"))
+	if state.Mode() != llm.ModeBuild {
+		t.Fatalf("invalid mode = %q, want build", state.Mode())
+	}
+}
+
+func TestAppState_EffectiveToolRegistryYoloIncludesWriteEditBash(t *testing.T) {
+	state := New(nil, t.TempDir())
+	for _, name := range []string{"read_file", "write_file", "edit_file", "bash"} {
+		if err := state.RegisterTool(dummyTool{name: name}); err != nil {
+			t.Fatalf("register %s: %v", name, err)
+		}
+	}
+	state.SetMode(llm.ModeYolo)
+	for _, name := range []string{"read_file", "write_file", "edit_file", "bash"} {
+		if _, ok := state.EffectiveToolRegistry().Get(name); !ok {
+			t.Fatalf("expected %s in yolo registry", name)
+		}
+	}
+	state.SetMode(llm.ModePlan)
+	for _, name := range []string{"write_file", "edit_file"} {
+		if _, ok := state.EffectiveToolRegistry().Get(name); ok {
+			t.Fatalf("expected %s excluded from plan registry", name)
+		}
+	}
+}
