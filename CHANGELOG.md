@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-09-13
+
+### Added
+- Reuse provider prompt caches during compaction: manual `/compact` and automatic compaction send the real system prompt plus full history so cached prefixes are reused instead of re-processing full history; compaction requests keep tool definitions but deny tool execution with an explicit error, and forced one-shot requests carry prompt-cache markers.
+- Route incomplete compaction streams to clean errors so the REPL cannot hang waiting for a summary, and fail compaction application on empty summaries.
+- Add `gpt-6-astra` to the OpenAI provider (1.05M context window, low/medium/high/xhigh/max thinking efforts) and to OpenCode Go with the Codex-mounted 272K context window.
+- Add `deepseek-v4.1-flash` and low thinking-effort support.
+
+### Changed
+- Extract dependency-safe leaf packages out of the `internal/llm` monolith.
+- Bump `google.golang.org/grpc` from 1.83.1 to 1.83.2.
+
 ## [0.54.0] - 2026-09-09
 
 ### Added
@@ -969,7 +981,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GoReleaser config for cross-platform binary distribution
 - npm wrapper package for installation via `npm install -g keen-code`
 
-[Unreleased]: https://github.com/mochow13/keen-code/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/mochow13/keen-code/compare/v0.55.0...HEAD
+[0.55.0]: https://github.com/mochow13/keen-code/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/mochow13/keen-code/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/mochow13/keen-code/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/mochow13/keen-code/compare/v0.51.0...v0.52.0
