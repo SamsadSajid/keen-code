@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-09-14
+
+### Added
+- Yolo agent mode (`/mode yolo`): skip all permission prompts, including dangerous `bash`, with a red input area as a reminder. `Shift+Tab` cycles through `build` → `plan` → `yolo`. `Guard` denials (system paths, `.gitignore`, home dotfiles) still block. Yolo has the full build tool registry (no plan-style tool stripping) and exits cleanly via `/mode build`.
+
 ## [0.55.0] - 2026-09-13
 
 ### Added
@@ -981,7 +986,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GoReleaser config for cross-platform binary distribution
 - npm wrapper package for installation via `npm install -g keen-code`
 
-[Unreleased]: https://github.com/mochow13/keen-code/compare/v0.55.0...HEAD
+[Unreleased]: https://github.com/mochow13/keen-code/compare/v0.56.0...HEAD
+[0.56.0]: https://github.com/mochow13/keen-code/compare/v0.55.0...v0.56.0
 [0.55.0]: https://github.com/mochow13/keen-code/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/mochow13/keen-code/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/mochow13/keen-code/compare/v0.52.0...v0.53.0
