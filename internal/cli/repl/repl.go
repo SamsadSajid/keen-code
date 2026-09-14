@@ -3,11 +3,12 @@ package repl
 import (
 	"context"
 	"fmt"
-	"github.com/mochow13/keen-code/internal/llm/core"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mochow13/keen-code/internal/llm/core"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
@@ -874,10 +875,6 @@ func (m replModel) View() tea.View {
 			styles.Focused.Prompt = repltheme.BtwPromptStyle
 		case adversaryMode:
 			styles.Focused.Prompt = repltheme.AdversaryPromptStyle
-		case m.currentMode() == llm.ModePlan:
-			styles.Focused.Prompt = repltheme.PromptPlanStyle
-		case m.currentMode() == llm.ModeYolo:
-			styles.Focused.Prompt = repltheme.PromptYoloStyle
 		default:
 			styles.Focused.Prompt = repltheme.PromptStyle
 		}
@@ -949,6 +946,20 @@ func (m replModel) inputMetaModel() string {
 	return model
 }
 
+func renderMode(mode llm.AgentMode) string {
+	if mode == "" {
+		mode = llm.ModeBuild
+	}
+	chipStyle := repltheme.ModeBuildChipStyle
+	switch mode {
+	case llm.ModePlan:
+		chipStyle = repltheme.ModePlanChipStyle
+	case llm.ModeYolo:
+		chipStyle = repltheme.ModeYoloChipStyle
+	}
+	return chipStyle.Render(string(mode))
+}
+
 func (m replModel) inputMetaStatusLine() string {
 	thinkingText := ""
 	if m.ctx != nil && m.ctx.cfg != nil && m.ctx.cfg.ThinkingEffort != "" && m.ctx.registry != nil {
@@ -976,7 +987,9 @@ func (m replModel) inputMetaStatusLine() string {
 	if timerText != "" {
 		parts = append(parts, timerText)
 	}
-	return "  " + strings.Join(parts, repltheme.MetaLabelStyle.Render(" • "))
+	left := "  " + strings.Join(parts, repltheme.MetaLabelStyle.Render(" • "))
+	chip := renderMode(m.mode)
+	return left + repltheme.MetaLabelStyle.Render(" • ") + chip
 }
 
 func (m *replModel) replayLoadedSession(loaded *session.LoadedSession) {

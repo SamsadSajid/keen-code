@@ -310,8 +310,15 @@ func TestInitialModel_PlanModeSetsPromptStyle(t *testing.T) {
 	if !strings.Contains(view, repltheme.ModePlanChipStyle.Render("plan")) {
 		t.Fatalf("expected plan mode chip in view, got %q", view)
 	}
-	if !strings.Contains(view, styleColorPrefix(repltheme.InputRulePlanStyle)) {
-		t.Fatalf("expected plan mode prompt to use secondary color, got %q", view)
+	if !strings.Contains(view, styleColorPrefix(repltheme.InputRuleStyle)) {
+		t.Fatalf("expected plan mode rules to use primary color, got %q", view)
+	}
+	lines := strings.Split(m.inputMetaView(), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 meta lines, got %q", m.inputMetaView())
+	}
+	if !strings.Contains(lines[1], repltheme.ModePlanChipStyle.Render("plan")) {
+		t.Fatalf("expected plan mode chip in second meta line, got %q", lines[1])
 	}
 }
 
@@ -323,8 +330,15 @@ func TestInitialModel_YoloModeSetsPromptStyle(t *testing.T) {
 	if !strings.Contains(view, repltheme.ModeYoloChipStyle.Render("yolo")) {
 		t.Fatalf("expected yolo mode chip in view, got %q", view)
 	}
-	if !strings.Contains(view, styleColorPrefix(repltheme.YoloInputRuleStyle)) {
-		t.Fatalf("expected yolo mode prompt to use error color, got %q", view)
+	if !strings.Contains(view, styleColorPrefix(repltheme.InputRuleStyle)) {
+		t.Fatalf("expected yolo mode rules to use primary color, got %q", view)
+	}
+	lines := strings.Split(m.inputMetaView(), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 meta lines, got %q", m.inputMetaView())
+	}
+	if !strings.Contains(lines[1], repltheme.ModeYoloChipStyle.Render("yolo")) {
+		t.Fatalf("expected yolo mode chip in second meta line, got %q", lines[1])
 	}
 }
 
@@ -688,11 +702,11 @@ func TestRenderInputArea_UsesSecondaryStyleForPlanMode(t *testing.T) {
 	if len(lines) < 1 {
 		t.Fatalf("expected at least 1 line, got %v", lines)
 	}
-	if !strings.Contains(lines[0], repltheme.ModePlanChipStyle.Render("plan")) {
-		t.Fatalf("expected plan mode chip in top rule, got %q", lines[0])
+	if strings.Contains(lines[0], repltheme.ModePlanChipStyle.Render("plan")) {
+		t.Fatalf("expected no plan mode chip in top rule, got %q", lines[0])
 	}
-	if !strings.Contains(lines[0], styleColorPrefix(repltheme.PlanInputRuleStyle)) {
-		t.Fatalf("expected plan mode rule to use secondary color, got %q", lines[0])
+	if !strings.Contains(lines[0], styleColorPrefix(repltheme.InputRuleStyle)) {
+		t.Fatalf("expected plan mode rule to use primary color, got %q", lines[0])
 	}
 }
 
@@ -702,11 +716,11 @@ func TestRenderInputArea_UsesErrorStyleForYoloMode(t *testing.T) {
 	if len(lines) < 1 {
 		t.Fatalf("expected at least 1 line, got %v", lines)
 	}
-	if !strings.Contains(lines[0], repltheme.ModeYoloChipStyle.Render("yolo")) {
-		t.Fatalf("expected yolo mode chip in top rule, got %q", lines[0])
+	if strings.Contains(lines[0], repltheme.ModeYoloChipStyle.Render("yolo")) {
+		t.Fatalf("expected no yolo mode chip in top rule, got %q", lines[0])
 	}
-	if !strings.Contains(lines[0], styleColorPrefix(repltheme.YoloInputRuleStyle)) {
-		t.Fatalf("expected yolo mode rule to use error color, got %q", lines[0])
+	if !strings.Contains(lines[0], styleColorPrefix(repltheme.InputRuleStyle)) {
+		t.Fatalf("expected yolo mode rule to use primary color, got %q", lines[0])
 	}
 }
 
@@ -716,8 +730,11 @@ func TestRenderInputArea_UsesPrimaryStyleForBuildMode(t *testing.T) {
 	if len(lines) < 1 {
 		t.Fatalf("expected at least 1 line, got %v", lines)
 	}
-	if !strings.Contains(lines[0], repltheme.ModeBuildChipStyle.Render("build")) {
-		t.Fatalf("expected build mode chip in top rule, got %q", lines[0])
+	if strings.Contains(lines[0], repltheme.ModeBuildChipStyle.Render("build")) {
+		t.Fatalf("expected no build mode chip in top rule, got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], styleColorPrefix(repltheme.InputRuleStyle)) {
+		t.Fatalf("expected build mode rule to use primary color, got %q", lines[0])
 	}
 }
 
