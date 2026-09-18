@@ -352,6 +352,8 @@ func (c *BedrockClient) StreamChat(
 			execRegistry := toolRegistry
 			if streamOpts.DisableToolCalls {
 				execRegistry = denyToolRegistry(toolRegistry)
+			} else if streamOpts.DisableWriteToolCalls {
+				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolResults, activities := c.executeTools(ctx, toolUses, execRegistry, eventCh)
 			msgParams = append(msgParams, brtypes.Message{Role: brtypes.ConversationRoleUser, Content: toolResults})

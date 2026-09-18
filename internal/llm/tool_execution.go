@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 
+	"log/slog"
+	"time"
+
 	"github.com/mochow13/keen-code/internal/llm/compress"
 	"github.com/mochow13/keen-code/internal/llm/core"
 	"github.com/mochow13/keen-code/internal/tools"
-	"log/slog"
-	"time"
 )
 
 func historicalToolActivity(name string, input map[string]any, output, llmOutput any, execErr error) core.HistoricalToolActivity {
@@ -62,6 +63,8 @@ func executeTool(ctx context.Context, registry *tools.Registry, name string, inp
 
 const toolCallsDisabledMessage = "Tool calls are disabled during compaction; use the history."
 
+const writeToolsDisabledMessage = "Write tools (write_file, edit_file) are disabled in plan mode; ask the user to switch with `/mode build` or `Shift+Tab`."
+
 // denyToolRegistry preserves the tool definitions but rejects execution.
 func denyToolRegistry(registry *tools.Registry) *tools.Registry {
 	if registry == nil {
@@ -82,6 +85,32 @@ func (d *deniedTool) ValidateInput(context.Context, any) error { return nil }
 
 func (d *deniedTool) Execute(context.Context, any) (any, error) {
 	return nil, errors.New(toolCallsDisabledMessage)
+}
+
+// denyWriteToolRegistry blocks write_file/edit_file but keeps definitions stable for caching.
+func denyWriteToolRegistry(registry *tools.Registry) *tools.Registry {
+	if registry == nil {
+		return nil
+	}
+	denied := tools.NewRegistry()
+	for _, tool := range registry.All() {
+		if tool.Name() == tools.WriteFileToolName || tool.Name() == tools.EditFileToolName {
+			_ = denied.Register(&deniedWriteTool{Tool: tool})
+			continue
+		}
+		_ = denied.Register(tool)
+	}
+	return denied
+}
+
+type deniedWriteTool struct {
+	tools.Tool
+}
+
+func (d *deniedWriteTool) ValidateInput(context.Context, any) error { return nil }
+
+func (d *deniedWriteTool) Execute(context.Context, any) (any, error) {
+	return nil, errors.New(writeToolsDisabledMessage)
 }
 
 func executeValidatedTool(

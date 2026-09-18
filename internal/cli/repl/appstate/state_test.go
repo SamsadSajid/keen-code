@@ -304,13 +304,15 @@ func TestAppState_StreamChat_NilClient(t *testing.T) {
 	}
 }
 
-func TestAppState_StreamChatPlanModeUsesPlanPromptAndRemovesWriteTools(t *testing.T) {
+func TestAppState_StreamChatPlanModeKeepsPromptStableAndDeniesWritesAtExecution(t *testing.T) {
 	var capturedMessages []core.Message
 	var capturedRegistry *tools.Registry
+	var capturedOpts []core.StreamOptions
 	client := &mockLLMClient{
-		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, _ []core.StreamOptions) (<-chan core.StreamEvent, error) {
+		streamChatFunc: func(ctx context.Context, messages []core.Message, toolRegistry *tools.Registry, opts []core.StreamOptions) (<-chan core.StreamEvent, error) {
 			capturedMessages = append([]core.Message(nil), messages...)
 			capturedRegistry = toolRegistry
+			capturedOpts = append([]core.StreamOptions(nil), opts...)
 			ch := make(chan core.StreamEvent)
 			close(ch)
 			return ch, nil
@@ -329,24 +331,31 @@ func TestAppState_StreamChatPlanModeUsesPlanPromptAndRemovesWriteTools(t *testin
 	if err := state.RegisterTool(dummyTool{name: "bash"}); err != nil {
 		t.Fatalf("register bash: %v", err)
 	}
-	state.SetMode(llm.ModePlan)
+state.SetMode(llm.ModePlan)
+	state.AddUserMessage("make a plan")
 
 	if _, err := state.StreamChat(context.Background(), &config.ResolvedConfig{APIKey: "key", Model: "model"}); err != nil {
 		t.Fatalf("StreamChat() error = %v", err)
 	}
 
-	if len(capturedMessages) == 0 || !strings.Contains(capturedMessages[0].Content, "# Active mode: plan") {
-		t.Fatalf("expected plan system prompt, got %#v", capturedMessages)
+	if len(capturedMessages) == 0 || strings.Contains(capturedMessages[0].Content, "Active mode:") {
+		t.Fatalf("expected stable system prompt without mode suffix, got %#v", capturedMessages)
 	}
-	for _, name := range []string{"read_file", "bash"} {
+	if last := capturedMessages[len(capturedMessages)-1]; last.Role != core.RoleUser || !strings.Contains(last.Content, "Active mode: plan") {
+		t.Fatalf("expected plan suffix on last user message, got %#v", last)
+	}
+	if got := state.GetMessages(); len(got) != 1 || got[0].Content != "make a plan"+llm.ModeUserSuffix(llm.ModePlan) {
+		t.Fatalf("expected stored history to persist plan suffix, got %#v", got)
+	}
+	for _, name := range []string{"read_file", "bash", "write_file", "edit_file"} {
 		if _, ok := capturedRegistry.Get(name); !ok {
-			t.Fatalf("expected %s to remain in the plan mode registry", name)
+			t.Fatalf("expected %s to remain in the request registry for cache stability", name)
 		}
+	}
+	if len(capturedOpts) != 1 || !capturedOpts[0].DisableWriteToolCalls {
+		t.Fatalf("expected DisableWriteToolCalls in plan mode, got %#v", capturedOpts)
 	}
 	for _, name := range []string{"write_file", "edit_file"} {
-		if _, ok := capturedRegistry.Get(name); ok {
-			t.Fatalf("expected %s to be removed from the plan mode registry", name)
-		}
 		if _, ok := state.EffectiveToolRegistry().Get(name); ok {
 			t.Fatalf("expected effective plan registry to exclude %s", name)
 		}
@@ -356,6 +365,30 @@ func TestAppState_StreamChatPlanModeUsesPlanPromptAndRemovesWriteTools(t *testin
 	}
 	if _, ok := state.GetToolRegistry().Get("edit_file"); !ok {
 		t.Fatal("expected original registry to keep edit_file")
+	}
+
+state.SetMode(llm.ModeBuild)
+	state.AddUserMessage("build it")
+	if _, err := state.StreamChat(context.Background(), &config.ResolvedConfig{APIKey: "key", Model: "model"}); err != nil {
+		t.Fatalf("StreamChat() error = %v", err)
+	}
+	if last := capturedMessages[len(capturedMessages)-1]; strings.Contains(last.Content, "Active mode:") {
+		t.Fatalf("expected no mode suffix on build user message, got %#v", last)
+	}
+	if last := capturedMessages[len(capturedMessages)-1]; last.Content != "build it" {
+		t.Fatalf("expected stored build message unchanged, got %#v", last)
+	}
+	if first := capturedMessages[1]; !strings.Contains(first.Content, "Active mode: plan") {
+		t.Fatalf("expected first user message to keep plan suffix, got %#v", first)
+	}
+	if _, err := state.StreamChat(context.Background(), &config.ResolvedConfig{APIKey: "key", Model: "model"}); err != nil {
+		t.Fatalf("StreamChat() error = %v", err)
+	}
+	if last := capturedMessages[len(capturedMessages)-1]; strings.Contains(last.Content, "Active mode:") {
+		t.Fatalf("expected no mode suffix on build user message, got %#v", last)
+	}
+	if len(capturedOpts) != 1 || capturedOpts[0].DisableWriteToolCalls {
+		t.Fatalf("expected DisableWriteToolCalls=false in build mode, got %#v", capturedOpts)
 	}
 }
 
@@ -497,7 +530,7 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 		t.Fatal("expected compaction stream")
 	}
 
-	if capturedRegistry != state.EffectiveToolRegistry() {
+	if capturedRegistry != state.GetToolRegistry() {
 		t.Fatal("expected compaction to reuse the normal tool registry for prompt-cache parity")
 	}
 	if len(capturedOpts) != 1 || !capturedOpts[0].DisableAutoCompaction || !capturedOpts[0].DisableToolCalls || capturedOpts[0].SessionID != "compact-session" {
@@ -509,7 +542,7 @@ func TestAppState_StreamCompactBuildsCompactionRequest(t *testing.T) {
 	if capturedMessages[0].Role != core.RoleSystem {
 		t.Fatalf("expected first compaction message to be system, got %s", capturedMessages[0].Role)
 	}
-	wantSystem := llm.Build(state.WorkingDir(), state.SkillsCatalog(), state.SubagentsCatalog(), state.Mode())
+	wantSystem := llm.Build(state.WorkingDir(), state.SkillsCatalog(), state.SubagentsCatalog())
 	if capturedMessages[0].Content != wantSystem {
 		t.Fatalf("expected the normal agent system prompt, got %q", capturedMessages[0].Content)
 	}

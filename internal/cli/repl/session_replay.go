@@ -3,8 +3,10 @@ package repl
 import (
 	"encoding/json"
 	"errors"
-	"github.com/mochow13/keen-code/internal/llm/core"
 	"time"
+
+	"github.com/mochow13/keen-code/internal/llm"
+	"github.com/mochow13/keen-code/internal/llm/core"
 
 	replmarkdown "github.com/mochow13/keen-code/internal/cli/repl/markdown"
 	reploutput "github.com/mochow13/keen-code/internal/cli/repl/output"
@@ -42,7 +44,7 @@ func (r *sessionReplay) applyEvent(event session.Event) {
 	case session.KindUserMessage:
 		r.flushDone()
 		if event.UserMessage != nil {
-			r.output.AddUserInput(event.UserMessage.Content, repltheme.PromptStyle)
+			r.output.AddUserInput(llm.StripModeSuffix(event.UserMessage.Content), repltheme.PromptStyle)
 		}
 	case session.KindAssistantTurn:
 		r.applyAssistantTurn(event.AssistantTurn)

@@ -339,6 +339,8 @@ func (c *OpenAIResponsesClient) StreamChat(
 			execRegistry := toolRegistry
 			if streamOpts.DisableToolCalls {
 				execRegistry = denyToolRegistry(toolRegistry)
+			} else if streamOpts.DisableWriteToolCalls {
+				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolResults, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)
 			input = append(input, toolResults...)

@@ -427,7 +427,7 @@ func (m *replModel) submitInput(input string, fromQueue bool) (replModel, tea.Cm
 		return *m, nil
 	}
 
-	if err := m.sessions.appendUserMessage(input); err != nil {
+	if err := m.sessions.appendUserMessage(m.appState.FormatUserMessage(input)); err != nil {
 		m.output.AddError("Session persistence failed: "+err.Error(), repltheme.ErrorStyle)
 		if !fromQueue {
 			m.textarea.Reset()
@@ -437,7 +437,7 @@ func (m *replModel) submitInput(input string, fromQueue bool) (replModel, tea.Cm
 		return *m, nil
 	}
 
-	m.appState.AddMessage(core.RoleUser, input)
+	m.appState.AddUserMessage(input)
 
 	ctx := m.startStreamContext()
 	eventCh, err := m.appState.StreamChat(ctx, m.ctx.cfg, core.StreamOptions{SessionID: m.sessions.currentID()})

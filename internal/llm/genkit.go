@@ -322,6 +322,8 @@ func (c *GenkitClient) StreamChat(
 			execRegistry := toolRegistry
 			if streamOpts.DisableToolCalls {
 				execRegistry = denyToolRegistry(toolRegistry)
+			} else if streamOpts.DisableWriteToolCalls {
+				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolResponseParts, activities := c.executeTools(ctx, toolRequests, execRegistry, eventCh)
 			if len(toolResponseParts) > 0 {

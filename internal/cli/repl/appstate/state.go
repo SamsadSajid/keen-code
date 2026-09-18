@@ -179,13 +179,32 @@ func (s *AppState) StreamChat(ctx context.Context, cfg *config.ResolvedConfig, o
 		return nil, nil
 	}
 	messages := append([]core.Message{s.systemPromptMessage()}, s.GetMessages()...)
-	return s.llmClient.StreamChat(ctx, messages, s.EffectiveToolRegistry(), opts...)
+	var merged core.StreamOptions
+	if len(opts) > 0 {
+		merged = opts[0]
+	}
+	if !merged.DisableToolCalls {
+		merged.DisableWriteToolCalls = s.Mode() == llm.ModePlan
+	}
+	// Full registry keeps tool definitions stable; writes blocked at execution.
+	return s.llmClient.StreamChat(ctx, messages, s.toolRegistry, merged)
 }
+
+func (s *AppState) FormatUserMessage(content string) string {
+	return content + llm.ModeUserSuffix(s.Mode())
+}
+
+func (s *AppState) AddUserMessage(content string) string {
+	full := s.FormatUserMessage(content)
+	s.AddMessage(core.RoleUser, full)
+	return full
+}
+
 
 func (s *AppState) systemPromptMessage() core.Message {
 	return core.Message{
 		Role:    core.RoleSystem,
-		Content: llm.Build(s.workingDir, s.SkillsCatalog(), s.SubagentsCatalog(), s.mode),
+		Content: llm.Build(s.workingDir, s.SkillsCatalog(), s.SubagentsCatalog()),
 	}
 }
 
@@ -216,10 +235,10 @@ func (s *AppState) StreamCompact(ctx context.Context, cfg *config.ResolvedConfig
 	if err != nil || requestMessages == nil {
 		return nil, err
 	}
-	// Keep the request prefix identical to a regular turn so provider prompt caches stay warm.
+	// Keep prefix stable for prompt-cache reuse.
 	opts.DisableToolCalls = true
 	opts.DisableAutoCompaction = true
-	return s.llmClient.StreamChat(ctx, requestMessages, s.EffectiveToolRegistry(), opts)
+	return s.llmClient.StreamChat(ctx, requestMessages, s.toolRegistry, opts)
 }
 
 func (s *AppState) StreamBtw(ctx context.Context, question string, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
@@ -320,6 +339,7 @@ func (s *AppState) GetToolRegistry() *tools.Registry {
 	return s.toolRegistry
 }
 
+// EffectiveToolRegistry is for display/subagents; chat requests use the full registry.
 func (s *AppState) EffectiveToolRegistry() *tools.Registry {
 	if s.mode == llm.ModePlan {
 		return s.toolRegistry.Without(tools.WriteFileToolName, tools.EditFileToolName)
@@ -374,15 +394,19 @@ func (s *AppState) ClearContextMetrics() {
 // provider has reported input token usage, category counts are scaled so they
 // sum to the reported total; otherwise raw heuristic estimates are returned.
 func (s *AppState) GetContextBreakdown() core.ContextBreakdown {
-	systemPrompt := llm.Build(s.workingDir, s.SkillsCatalog(), s.SubagentsCatalog(), s.Mode())
+	systemPrompt := llm.Build(s.workingDir, s.SkillsCatalog(), s.SubagentsCatalog())
 
 	var toolDefs []core.ContextToolDef
-	for _, tool := range s.EffectiveToolRegistry().All() {
-		toolDefs = append(toolDefs, core.ContextToolDef{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-			InputSchema: tool.InputSchema(),
-		})
+	if s.toolRegistry == nil {
+		toolDefs = nil
+	} else {
+		for _, tool := range s.toolRegistry.All() {
+			toolDefs = append(toolDefs, core.ContextToolDef{
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				InputSchema: tool.InputSchema(),
+			})
+		}
 	}
 
 	messages := make([]core.ContextMessage, 0, len(s.messages))

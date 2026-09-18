@@ -11,7 +11,7 @@ import (
 
 func TestBuild_ContainsIdentity(t *testing.T) {
 	dir := t.TempDir()
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if !strings.Contains(result, "Keen Code") {
 		t.Error("expected output to contain 'Keen Code'")
 	}
@@ -25,7 +25,7 @@ func TestBuild_SharedPromptIsByteBounded(t *testing.T) {
 
 func TestBuild_ContainsWorkingDir(t *testing.T) {
 	dir := t.TempDir()
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if !strings.Contains(result, dir) {
 		t.Errorf("expected output to contain working dir %q", dir)
 	}
@@ -36,7 +36,7 @@ func TestBuild_AgentsMd_Found(t *testing.T) {
 	content := "## My Project\nSome instructions here."
 	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644)
 
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if !strings.Contains(result, "# Project Instructions") {
 		t.Error("expected project instructions section")
 	}
@@ -51,7 +51,7 @@ func TestBuild_AgentsMd_WalkUp(t *testing.T) {
 	os.MkdirAll(child, 0755)
 	os.WriteFile(filepath.Join(parent, "AGENTS.md"), []byte("parent instructions"), 0644)
 
-	result := Build(child, "", "", ModeBuild)
+	result := Build(child, "", "")
 	if !strings.Contains(result, "parent instructions") {
 		t.Error("expected AGENTS.md from parent directory")
 	}
@@ -61,7 +61,7 @@ func TestBuild_ClaudeMd_Fallback(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("claude instructions"), 0644)
 
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if !strings.Contains(result, "claude instructions") {
 		t.Error("expected CLAUDE.md content as fallback")
 	}
@@ -69,7 +69,7 @@ func TestBuild_ClaudeMd_Fallback(t *testing.T) {
 
 func TestBuild_NoInstructionFile(t *testing.T) {
 	dir := t.TempDir()
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if strings.Contains(result, "# Project Instructions") {
 		t.Error("expected no project instructions section when no file exists")
 	}
@@ -80,7 +80,7 @@ func TestBuild_AgentsMd_Truncation(t *testing.T) {
 	content := strings.Repeat("x", 10*1024)
 	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0644)
 
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if !strings.Contains(result, "[truncated") {
 		t.Error("expected truncation note for large AGENTS.md")
 	}
@@ -90,7 +90,7 @@ func TestBuild_AgentsMd_Empty(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(""), 0644)
 
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if strings.Contains(result, "# Project Instructions") {
 		t.Error("expected no project instructions for empty AGENTS.md")
 	}
@@ -100,7 +100,7 @@ func TestBuild_IncludesSkillsCatalog(t *testing.T) {
 	dir := t.TempDir()
 	catalog := skills.Catalog([]skills.Skill{{Name: "demo", Description: "Demo skill", Location: "/tmp/demo/SKILL.md"}}, skills.Config{})
 
-	result := Build(dir, catalog, "", ModeBuild)
+	result := Build(dir, catalog, "")
 	if !strings.Contains(result, "## Available Skills") {
 		t.Fatal("expected skills catalog")
 	}
@@ -109,39 +109,51 @@ func TestBuild_IncludesSkillsCatalog(t *testing.T) {
 	}
 }
 
-func TestBuild_PlanIncludesPlanInstructions(t *testing.T) {
-	result := Build(t.TempDir(), "", "", ModePlan)
-	for _, expected := range []string{"# Active mode: plan", "write_file and edit_file are unavailable", "/mode build or Shift+Tab"} {
+func TestBuild_IsStableAcrossModes(t *testing.T) {
+	dir := t.TempDir()
+	catalog := skills.Catalog([]skills.Skill{{Name: "demo", Description: "Demo skill", Location: "/tmp/demo/SKILL.md"}}, skills.Config{})
+
+	result := Build(dir, catalog, "")
+for _, unexpected := range []string{"Active mode:"} {
+		if strings.Contains(result, unexpected) {
+			t.Fatalf("expected %q to be absent from stable system prompt, got %q", unexpected, result)
+		}
+	}
+}
+
+func TestModeUserSuffix_PlanIncludesPlanInstructions(t *testing.T) {
+	result := ModeUserSuffix(ModePlan)
+for _, expected := range []string{"Active mode: plan", "write_file and edit_file are unavailable"} {
 		if !strings.Contains(result, expected) {
-			t.Fatalf("expected %q in plan prompt, got %q", expected, result)
+			t.Fatalf("expected %q in plan suffix, got %q", expected, result)
 		}
 	}
 }
 
-func TestBuild_BuildIncludesBuildInstructions(t *testing.T) {
-	result := Build(t.TempDir(), "", "", ModeBuild)
-	if !strings.Contains(result, "# Active mode: build") {
-		t.Fatalf("expected build mode prompt, got %q", result)
-	}
-	if strings.Contains(result, "write_file and edit_file are not available") {
-		t.Fatalf("did not expect plan restrictions in build prompt, got %q", result)
+func TestModeUserSuffix_BuildHasNoSuffix(t *testing.T) {
+	if got := ModeUserSuffix(ModeBuild); got != "" {
+		t.Fatalf("expected no build mode suffix, got %q", got)
 	}
 }
 
-func TestBuild_YoloUsesBuildInstructions(t *testing.T) {
-	yolo := Build(t.TempDir(), "", "", ModeYolo)
-	if !strings.Contains(yolo, "# Active mode: build") {
-		t.Fatalf("expected yolo mode to use build prompt, got %q", yolo)
+func TestModeUserSuffix_YoloHasNoSuffix(t *testing.T) {
+	if got := ModeUserSuffix(ModeYolo); got != "" {
+		t.Fatalf("expected no yolo mode suffix, got %q", got)
 	}
-	for _, unexpected := range []string{"# Active mode: yolo", "write_file and edit_file are unavailable", "Read-only mode"} {
-		if strings.Contains(yolo, unexpected) {
-			t.Fatalf("expected %q to be absent from yolo prompt, got %q", unexpected, yolo)
-		}
+}
+
+
+func TestStripModeSuffix_RemovesAppendedSuffix(t *testing.T) {
+	if got := StripModeSuffix("hello" + ModeUserSuffix(ModePlan)); got != "hello" {
+		t.Fatalf("expected plan suffix stripped, got %q", got)
+	}
+	if got := StripModeSuffix("hello"); got != "hello" {
+		t.Fatalf("expected untouched content, got %q", got)
 	}
 }
 
 func TestBuild_IncludesToolFollowThroughInstructions(t *testing.T) {
-	result := Build(t.TempDir(), "", "", ModeBuild)
+	result := Build(t.TempDir(), "", "")
 	for _, expected := range []string{
 		"Do not narrate tool use",
 		"call the tool before reporting",
@@ -160,23 +172,6 @@ func TestBuild_IncludesToolFollowThroughInstructions(t *testing.T) {
 	}
 }
 
-func TestBuild_ModeInstructionsAreAtEnd(t *testing.T) {
-	dir := t.TempDir()
-	catalog := skills.Catalog([]skills.Skill{{Name: "demo", Description: "Demo skill", Location: "/tmp/demo/SKILL.md"}}, skills.Config{})
-
-	result := Build(dir, catalog, "", ModePlan)
-	modeIndex := strings.Index(result, "# Active mode: plan")
-	if modeIndex == -1 {
-		t.Fatal("expected active mode section")
-	}
-	if strings.Contains(result[modeIndex:], "Working directory:") {
-		t.Fatal("expected working directory before mode section")
-	}
-	if strings.Contains(result[modeIndex:], "## Available Skills") {
-		t.Fatal("expected skills catalog before mode section")
-	}
-}
-
 func TestBuild_ProjectMemoryIncluded(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, ".keen")
@@ -184,7 +179,7 @@ func TestBuild_ProjectMemoryIncluded(t *testing.T) {
 	memPath := filepath.Join(memDir, "MEMORY.md")
 	os.WriteFile(memPath, []byte("- run go test -race ./... after Go changes"), 0644)
 
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if !strings.Contains(result, "go test -race") {
 		t.Fatal("expected memory content in prompt")
 	}
@@ -192,7 +187,7 @@ func TestBuild_ProjectMemoryIncluded(t *testing.T) {
 
 func TestBuild_NoMemorySectionWhenEmpty(t *testing.T) {
 	dir := t.TempDir()
-	result := Build(dir, "", "", ModeBuild)
+	result := Build(dir, "", "")
 	if strings.Contains(result, "run go test -race ./... after Go changes") {
 		t.Fatal("expected no loaded memory content when no memory file exists")
 	}

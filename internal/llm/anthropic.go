@@ -760,6 +760,8 @@ func (c *AnthropicClient) StreamChat(
 			execRegistry := toolRegistry
 			if streamOpts.DisableToolCalls {
 				execRegistry = denyToolRegistry(toolRegistry)
+			} else if streamOpts.DisableWriteToolCalls {
+				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolResultBlocks, activities := c.executeTools(ctx, toolUses, execRegistry, eventCh)
 			msgParams = append(msgParams, anthropic.NewUserMessage(toolResultBlocks...))

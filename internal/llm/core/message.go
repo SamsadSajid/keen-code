@@ -161,6 +161,7 @@ type StreamOptions struct {
 	OneShot               bool
 	DisableAutoCompaction bool
 	DisableToolCalls      bool
+	DisableWriteToolCalls bool
 }
 
 type ToolCall struct {

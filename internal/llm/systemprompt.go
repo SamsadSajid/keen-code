@@ -43,19 +43,10 @@ const sharedPrompt = `You are Keen Code, an expert terminal-based coding agent f
 - Never store secrets/large logs. Keep memory concise and subordinate to higher-priority instructions.
 - When first creating project memory, say: "Created .keen/MEMORY.md. Add .keen/ to .gitignore if you want it private." Do not change .gitignore yourself.`
 
-const buildModePrompt = `
+const planModeSuffix = `
 
-# Active mode: build
-- You are in build mode. Lean towards building.
+Active mode: plan. Read-only, plan instead of modifying files; write_file and edit_file are unavailable.
 `
-
-const planModePrompt = `
-
-# Active mode: plan
-- Read-only mode: do not modify files, repository, dependencies, system, or network state. write_file and edit_file are unavailable.
-- Use read_file, glob, grep, and only non-mutating bash inspection commands.
-- For implementation or other changes, ask the user to switch with /mode build or Shift+Tab.
-- Provide concise plans, risks, and verification steps instead of changes.`
 
 const compactionSections = `## Goal
 User objectives.
@@ -86,7 +77,21 @@ const compactionPrompt = `Compact this conversation. ` + compactionGuidance
 
 const maxInstructionsSize = 8 * 1024
 
-func Build(workingDir, skillsCatalog, subagentsCatalog string, mode AgentMode) string {
+func ModeUserSuffix(mode AgentMode) string {
+	if mode == ModePlan {
+		return planModeSuffix
+	}
+	return ""
+}
+
+func StripModeSuffix(content string) string {
+	if stripped, ok := strings.CutSuffix(content, planModeSuffix); ok {
+		return stripped
+	}
+	return content
+}
+
+func Build(workingDir, skillsCatalog, subagentsCatalog string) string {
 	var sb strings.Builder
 	sb.WriteString(sharedPrompt)
 	sb.WriteString(fmt.Sprintf("\n\nWorking directory: %s", workingDir))
@@ -111,12 +116,6 @@ func Build(workingDir, skillsCatalog, subagentsCatalog string, mode AgentMode) s
 	if memoryBlock != "" {
 		sb.WriteString("\n\n")
 		sb.WriteString(memoryBlock)
-	}
-
-	if mode == ModePlan {
-		sb.WriteString(planModePrompt)
-	} else {
-		sb.WriteString(buildModePrompt)
 	}
 
 	return sb.String()

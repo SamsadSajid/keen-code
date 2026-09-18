@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/mochow13/keen-code/internal/llm/core"
 	"io"
 	"strings"
+
+	"github.com/mochow13/keen-code/internal/llm/core"
 
 	"github.com/mochow13/keen-code/internal/cli/repl/appstate"
 	replappstate "github.com/mochow13/keen-code/internal/cli/repl/appstate"
@@ -100,10 +101,10 @@ func RunHeadless(ctx context.Context, opts HeadlessRunOptions) (*HeadlessRunResu
 		appState.ReplaceMessages(session.BuildConversation(loaded.Events))
 	}
 
-	if err := sessions.appendUserMessage(prompt); err != nil {
+	if err := sessions.appendUserMessage(appState.FormatUserMessage(prompt)); err != nil {
 		return nil, err
 	}
-	appState.AddMessage(core.RoleUser, prompt)
+	appState.AddUserMessage(prompt)
 
 	eventCh, err := appState.StreamChat(ctx, opts.Config, core.StreamOptions{SessionID: sessions.currentID()})
 	if err != nil {

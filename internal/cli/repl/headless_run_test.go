@@ -200,7 +200,7 @@ func TestRunHeadless_CreatesSessionAndWritesText(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatalf("expected session started, user, assistant events; got %d", len(events))
 	}
-	if events[1].UserMessage == nil || events[1].UserMessage.Content != "say hi" {
+if events[1].UserMessage == nil || events[1].UserMessage.Content != "say hi" {
 		t.Fatalf("unexpected user event: %#v", events[1].UserMessage)
 	}
 	if events[2].AssistantTurn == nil || events[2].AssistantTurn.Message != "hello" {
@@ -243,9 +243,11 @@ func TestRunHeadless_ResumesSessionConversation(t *testing.T) {
 		t.Fatalf("expected one StreamChat call, got %d", len(secondClient.messages))
 	}
 	got := messageContents(secondClient.messages[0])
-	want := []string{"first prompt", "first response", "second prompt"}
-	if !containsOrderedSuffix(got, want) {
-		t.Fatalf("expected conversation suffix %#v, got %#v", want, got)
+if len(got) < 4 || got[len(got)-3] != "first prompt" || got[len(got)-2] != "first response" {
+		t.Fatalf("expected conversation suffix ending with first prompt/response, got %#v", got)
+	}
+	if last := got[len(got)-1]; last != "second prompt" {
+		t.Fatalf("expected last message to be second prompt with build mode suffix, got %#v", got)
 	}
 	if len(secondClient.opts) != 1 || len(secondClient.opts[0]) != 1 || secondClient.opts[0][0].SessionID != first.SessionID {
 		t.Fatalf("expected session stream option %q, got %#v", first.SessionID, secondClient.opts)

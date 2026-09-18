@@ -3,12 +3,13 @@ package repl
 import (
 	"context"
 	"errors"
-	"github.com/mochow13/keen-code/internal/llm/core"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mochow13/keen-code/internal/llm/core"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"

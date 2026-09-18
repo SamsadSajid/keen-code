@@ -589,6 +589,8 @@ func (c *OpenAICompatibleClient) StreamChat(
 			execRegistry := toolRegistry
 			if streamOpts.DisableToolCalls {
 				execRegistry = denyToolRegistry(toolRegistry)
+			} else if streamOpts.DisableWriteToolCalls {
+				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolMsgs, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)
 			if len(toolMsgs) > 0 {

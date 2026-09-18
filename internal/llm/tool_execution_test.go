@@ -168,6 +168,61 @@ func TestDenyToolRegistry_NilRegistry(t *testing.T) {
 	}
 }
 
+func TestDenyWriteToolRegistry_DeniesWritesButAllowsReads(t *testing.T) {
+	write := &validatingExecutionTool{}
+	registry := tools.NewRegistry()
+	if err := registry.Register(writeToolStub{name: tools.WriteFileToolName}); err != nil {
+		t.Fatalf("register write_file: %v", err)
+	}
+	if err := registry.Register(writeToolStub{name: tools.EditFileToolName}); err != nil {
+		t.Fatalf("register edit_file: %v", err)
+	}
+	if err := registry.Register(write); err != nil {
+		t.Fatalf("register validating: %v", err)
+	}
+
+	denied := denyWriteToolRegistry(registry)
+	for _, name := range []string{tools.WriteFileToolName, tools.EditFileToolName, "validating"} {
+		if _, ok := denied.Get(name); !ok {
+			t.Fatalf("expected %s to remain registered", name)
+		}
+	}
+	for _, name := range []string{tools.WriteFileToolName, tools.EditFileToolName} {
+		got, _ := denied.Get(name)
+		if _, err := got.Execute(context.Background(), nil); err == nil || err.Error() != writeToolsDisabledMessage {
+			t.Fatalf("expected write rejection for %s, got %v", name, err)
+		}
+	}
+	read, _ := denied.Get("validating")
+	if _, err := read.Execute(context.Background(), nil); err != nil {
+		t.Fatalf("expected read tool to execute, got %v", err)
+	}
+	if !write.executed {
+		t.Fatal("expected non-write tool to execute the real tool")
+	}
+}
+
+func TestDenyWriteToolRegistry_NilRegistry(t *testing.T) {
+	if got := denyWriteToolRegistry(nil); got != nil {
+		t.Fatalf("expected nil registry, got %#v", got)
+	}
+}
+
+type writeToolStub struct {
+	name string
+	executed bool
+}
+
+func (t writeToolStub) Name() string { return t.name }
+
+func (t writeToolStub) Description() string { return "stub" }
+
+func (t writeToolStub) InputSchema() map[string]any { return map[string]any{} }
+
+func (t writeToolStub) Execute(context.Context, any) (any, error) {
+	return map[string]any{"ok": true}, nil
+}
+
 func TestDenyToolRegistry_ExecutionEmitsRejectedToolEnd(t *testing.T) {
 	tool := &validatingExecutionTool{}
 	registry := tools.NewRegistry()
