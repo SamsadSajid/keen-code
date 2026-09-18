@@ -114,7 +114,7 @@ func TestBuild_IsStableAcrossModes(t *testing.T) {
 	catalog := skills.Catalog([]skills.Skill{{Name: "demo", Description: "Demo skill", Location: "/tmp/demo/SKILL.md"}}, skills.Config{})
 
 	result := Build(dir, catalog, "")
-for _, unexpected := range []string{"Active mode:"} {
+	for _, unexpected := range []string{"Active mode:"} {
 		if strings.Contains(result, unexpected) {
 			t.Fatalf("expected %q to be absent from stable system prompt, got %q", unexpected, result)
 		}
@@ -123,7 +123,7 @@ for _, unexpected := range []string{"Active mode:"} {
 
 func TestModeUserSuffix_PlanIncludesPlanInstructions(t *testing.T) {
 	result := ModeUserSuffix(ModePlan)
-for _, expected := range []string{"Active mode: plan", "write_file and edit_file are unavailable"} {
+	for _, expected := range []string{"Active mode: plan", "write_file and edit_file are unavailable"} {
 		if !strings.Contains(result, expected) {
 			t.Fatalf("expected %q in plan suffix, got %q", expected, result)
 		}
@@ -141,7 +141,6 @@ func TestModeUserSuffix_YoloHasNoSuffix(t *testing.T) {
 		t.Fatalf("expected no yolo mode suffix, got %q", got)
 	}
 }
-
 
 func TestStripModeSuffix_RemovesAppendedSuffix(t *testing.T) {
 	if got := StripModeSuffix("hello" + ModeUserSuffix(ModePlan)); got != "hello" {

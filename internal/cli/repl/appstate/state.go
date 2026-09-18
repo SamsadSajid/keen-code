@@ -200,7 +200,6 @@ func (s *AppState) AddUserMessage(content string) string {
 	return full
 }
 
-
 func (s *AppState) systemPromptMessage() core.Message {
 	return core.Message{
 		Role:    core.RoleSystem,

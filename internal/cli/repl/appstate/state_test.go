@@ -331,7 +331,7 @@ func TestAppState_StreamChatPlanModeKeepsPromptStableAndDeniesWritesAtExecution(
 	if err := state.RegisterTool(dummyTool{name: "bash"}); err != nil {
 		t.Fatalf("register bash: %v", err)
 	}
-state.SetMode(llm.ModePlan)
+	state.SetMode(llm.ModePlan)
 	state.AddUserMessage("make a plan")
 
 	if _, err := state.StreamChat(context.Background(), &config.ResolvedConfig{APIKey: "key", Model: "model"}); err != nil {
@@ -367,7 +367,7 @@ state.SetMode(llm.ModePlan)
 		t.Fatal("expected original registry to keep edit_file")
 	}
 
-state.SetMode(llm.ModeBuild)
+	state.SetMode(llm.ModeBuild)
 	state.AddUserMessage("build it")
 	if _, err := state.StreamChat(context.Background(), &config.ResolvedConfig{APIKey: "key", Model: "model"}); err != nil {
 		t.Fatalf("StreamChat() error = %v", err)

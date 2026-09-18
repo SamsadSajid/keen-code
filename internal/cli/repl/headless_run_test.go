@@ -200,7 +200,7 @@ func TestRunHeadless_CreatesSessionAndWritesText(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatalf("expected session started, user, assistant events; got %d", len(events))
 	}
-if events[1].UserMessage == nil || events[1].UserMessage.Content != "say hi" {
+	if events[1].UserMessage == nil || events[1].UserMessage.Content != "say hi" {
 		t.Fatalf("unexpected user event: %#v", events[1].UserMessage)
 	}
 	if events[2].AssistantTurn == nil || events[2].AssistantTurn.Message != "hello" {
@@ -243,7 +243,7 @@ func TestRunHeadless_ResumesSessionConversation(t *testing.T) {
 		t.Fatalf("expected one StreamChat call, got %d", len(secondClient.messages))
 	}
 	got := messageContents(secondClient.messages[0])
-if len(got) < 4 || got[len(got)-3] != "first prompt" || got[len(got)-2] != "first response" {
+	if len(got) < 4 || got[len(got)-3] != "first prompt" || got[len(got)-2] != "first response" {
 		t.Fatalf("expected conversation suffix ending with first prompt/response, got %#v", got)
 	}
 	if last := got[len(got)-1]; last != "second prompt" {

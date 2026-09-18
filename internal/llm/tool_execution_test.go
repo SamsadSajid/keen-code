@@ -209,7 +209,7 @@ func TestDenyWriteToolRegistry_NilRegistry(t *testing.T) {
 }
 
 type writeToolStub struct {
-	name string
+	name     string
 	executed bool
 }
 
