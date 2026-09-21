@@ -113,6 +113,9 @@ func (t *ReadFileTool) Execute(ctx context.Context, input any) (any, error) {
 	}
 
 	permission := t.guard.CheckPath(path, "read")
+	if autoModeEnabled(t.permissionRequester) {
+		permission = t.guard.CheckAutoPath(path, "read")
+	}
 
 	switch permission {
 	case filesystem.PermissionDenied:

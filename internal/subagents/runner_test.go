@@ -21,6 +21,22 @@ type recordingClient struct {
 	events   []core.StreamEvent
 }
 
+type childAutoRequester struct{ reviews, prompts int }
+
+func (*childAutoRequester) AutoModeEnabled() bool { return true }
+func (r *childAutoRequester) RequestPermission(context.Context, string, string, string, bool) (bool, error) {
+	r.prompts++
+	return false, nil
+}
+func (r *childAutoRequester) RequestManualPermission(context.Context, string, string, string, bool) (bool, error) {
+	r.prompts++
+	return false, nil
+}
+func (r *childAutoRequester) ReviewOperation(context.Context, tools.Operation) (tools.OperationReviewDecision, error) {
+	r.reviews++
+	return tools.OperationReviewApproved, nil
+}
+
 func (c *recordingClient) StreamChat(ctx context.Context, messages []core.Message, registry *tools.Registry, opts ...core.StreamOptions) (<-chan core.StreamEvent, error) {
 	c.messages = core.CloneMessages(messages)
 	c.registry = registry
@@ -435,6 +451,27 @@ func TestCollectResultReturnsPartialTextOnError(t *testing.T) {
 	}
 	if text != "partial" {
 		t.Fatalf("expected partial text, got %q", text)
+	}
+}
+
+func TestToolFactoryChildUsesParentAutoReview(t *testing.T) {
+	root := t.TempDir()
+	parent := tools.NewRegistry()
+	if err := parent.Register(namedTool{name: tools.WriteFileToolName}); err != nil {
+		t.Fatal(err)
+	}
+	requester := &childAutoRequester{}
+	factory := ToolFactory{Guard: filesystem.NewGuard(root, nil), ParentRequester: requester}
+	child := factory.Registry(Profile{}, parent)
+	tool, ok := child.Get(tools.WriteFileToolName)
+	if !ok {
+		t.Fatal("child registry is missing write_file")
+	}
+	if _, err := tool.Execute(context.Background(), map[string]any{"path": "child.go", "content": "package child\n"}); err != nil {
+		t.Fatal(err)
+	}
+	if requester.reviews != 1 || requester.prompts != 0 {
+		t.Fatalf("child review=%d prompts=%d", requester.reviews, requester.prompts)
 	}
 }
 

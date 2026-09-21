@@ -98,7 +98,11 @@ func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []core.Mess
 			input, injectedPending = c.injectPendingState(input)
 		}
 		turnStartLen := len(input)
-		responseTools := toOpenAIResponseTools(toolRegistry)
+		requestRegistry := toolRegistry
+		if streamOpts.DisableToolCalls {
+			requestRegistry = nil
+		}
+		responseTools := toOpenAIResponseTools(requestRegistry)
 
 		for range maxToolTurns {
 			if err := c.proactivelyCompactHistory(
@@ -183,12 +187,14 @@ func (c *OpenAICodexClient) StreamChat(ctx context.Context, messages []core.Mess
 				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
+			if streamOpts.DisableToolCalls {
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: errors.New(toolCallsDisabledMessage)}
+				return
+			}
 
 			input = append(input, responseOutputInputs(completed.Output, toolCalls, streamedContent)...)
 			execRegistry := toolRegistry
-			if streamOpts.DisableToolCalls {
-				execRegistry = denyToolRegistry(toolRegistry)
-			} else if streamOpts.DisableWriteToolCalls {
+			if streamOpts.DisableWriteToolCalls {
 				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolResults, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)

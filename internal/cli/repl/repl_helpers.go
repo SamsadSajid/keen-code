@@ -3,6 +3,7 @@ package repl
 import (
 	"context"
 	"fmt"
+	"github.com/mochow13/keen-code/internal/approval"
 	"github.com/mochow13/keen-code/internal/llm/core"
 	"log/slog"
 	"math/rand/v2"
@@ -435,7 +436,7 @@ func (m *replModel) currentMode() llm.AgentMode {
 }
 
 func (m *replModel) setMode(mode llm.AgentMode) {
-	if mode != llm.ModePlan && mode != llm.ModeYolo {
+	if mode != llm.ModePlan && mode != llm.ModeYolo && mode != llm.ModeAuto {
 		mode = llm.ModeBuild
 	}
 	m.mode = mode
@@ -444,6 +445,16 @@ func (m *replModel) setMode(mode llm.AgentMode) {
 	}
 	if m.permissionRequester != nil {
 		m.permissionRequester.SetYoloMode(mode == llm.ModeYolo)
+		var reviewer *approval.Reviewer
+		if mode == llm.ModeAuto && m.ctx != nil && m.ctx.cfg != nil {
+			client, err := llm.NewClient(m.ctx.cfg)
+			if err != nil {
+				m.output.AddError("Auto approval unavailable: "+err.Error(), repltheme.ErrorStyle)
+			} else {
+				reviewer = approval.New(client)
+			}
+		}
+		m.permissionRequester.SetAutoMode(mode == llm.ModeAuto, reviewer)
 	}
 }
 func (m *replModel) toggleMode() {
@@ -452,6 +463,8 @@ func (m *replModel) toggleMode() {
 		m.setMode(llm.ModePlan)
 	case llm.ModePlan:
 		m.setMode(llm.ModeYolo)
+	case llm.ModeYolo:
+		m.setMode(llm.ModeAuto)
 	default:
 		m.setMode(llm.ModeBuild)
 	}
@@ -947,6 +960,9 @@ func (m *replModel) updateLLMClient() error {
 		return err
 	}
 	m.appState.UpdateClient(client)
+	if m.currentMode() == llm.ModeAuto {
+		m.setMode(llm.ModeAuto)
+	}
 	return nil
 }
 

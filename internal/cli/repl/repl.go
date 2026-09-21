@@ -956,6 +956,8 @@ func renderMode(mode llm.AgentMode) string {
 		chipStyle = repltheme.ModePlanChipStyle
 	case llm.ModeYolo:
 		chipStyle = repltheme.ModeYoloChipStyle
+	case llm.ModeAuto:
+		chipStyle = repltheme.ModeBuildChipStyle
 	}
 	return chipStyle.Render(string(mode))
 }

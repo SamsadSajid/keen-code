@@ -57,7 +57,7 @@ func SetupToolRegistry(
 		appState.RegisterTool(tools.NewCallMCPTool(mcpRuntime, permissionRequester))
 	}
 
-	toolFactory := subagents.ToolFactory{Guard: guard, MCPRuntime: mcpRuntime}
+	toolFactory := subagents.ToolFactory{Guard: guard, MCPRuntime: mcpRuntime, ParentRequester: permissionRequester}
 	runner := &subagents.Runner{
 		WorkingDir: workingDir,
 		Config:     cfg,

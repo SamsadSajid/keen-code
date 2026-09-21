@@ -884,7 +884,7 @@ func (m *replModel) handlePermissionKeyMsg(msg tea.KeyPressMsg) (replModel, tea.
 		choice := m.stream.handler.GetPendingChoice()
 		if choice == replpermissions.ChoiceAskWhatToDo {
 			m.stream.handler.ResolvePendingPermission(replpermissions.StatusRedirected)
-			m.permissionRequester.SendResponse(replpermissions.ChoiceDeny, req.ToolName)
+			m.permissionRequester.SendResponseFor(req.RequestID, replpermissions.ChoiceDeny, req.ToolName)
 			m.interruptStream(interruptedPromptText)
 			return m.drainQueuedInput()
 		}
@@ -898,7 +898,7 @@ func (m *replModel) handlePermissionKeyMsg(msg tea.KeyPressMsg) (replModel, tea.
 			status = replpermissions.StatusDenied
 		}
 		m.stream.handler.ResolvePendingPermission(status)
-		m.permissionRequester.SendResponse(choice, req.ToolName)
+		m.permissionRequester.SendResponseFor(req.RequestID, choice, req.ToolName)
 		m.updateViewportContent()
 		m.scrollToBottomIfFollowing()
 	case keyEsc:
@@ -907,7 +907,7 @@ func (m *replModel) handlePermissionKeyMsg(msg tea.KeyPressMsg) (replModel, tea.
 			return *m, nil
 		}
 		m.stream.handler.ResolvePendingPermission(replpermissions.StatusDenied)
-		m.permissionRequester.SendResponse(replpermissions.ChoiceDeny, req.ToolName)
+		m.permissionRequester.SendResponseFor(req.RequestID, replpermissions.ChoiceDeny, req.ToolName)
 		m.updateViewportContent()
 		m.scrollToBottomIfFollowing()
 	}

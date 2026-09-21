@@ -64,6 +64,8 @@ Keen Code is also an experiment to play with the *new way of working* where engi
 - **Headless mode** — Run a non-interactive turn with `keen run "<prompt>"`, with `--format json` output, provider/model overrides, `--completion-signal` gating, and `--session` resume. See [docs/cli-usage.md#headless-mode-keen-run](docs/cli-usage.md#headless-mode-keen-run).
 - **Permission system** — Filesystem access is guard-checked: working-directory paths pass, sensitive paths prompt for approval, and system or `.gitignore` paths are denied. Always-allow tools with `/allow-permission`. See [docs/permission-system.md](docs/permission-system.md).
 
+Use `/auto` to let a small approval subagent assess eligible shell commands and file changes. Risky operations still need manual review. Read the [auto mode guide](docs.md) and [design](arch.md).
+
 ## Screenshots
 
 <table>

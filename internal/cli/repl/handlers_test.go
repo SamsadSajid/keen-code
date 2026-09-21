@@ -598,11 +598,11 @@ func TestHandleKeyMsg_ShiftTabTogglesMode(t *testing.T) {
 	}
 
 	newM, _ = newM.handleKeyMsg(tea.KeyPressMsg{Text: "shift+tab"})
-	if newM.currentMode() != llm.ModeBuild {
-		t.Fatalf("expected build mode, got %q", newM.currentMode())
+	if newM.currentMode() != llm.ModeAuto {
+		t.Fatalf("expected auto mode, got %q", newM.currentMode())
 	}
-	if newM.appState.Mode() != llm.ModeBuild {
-		t.Fatalf("expected app state build mode, got %q", newM.appState.Mode())
+	if newM.appState.Mode() != llm.ModeAuto {
+		t.Fatalf("expected app state auto mode, got %q", newM.appState.Mode())
 	}
 }
 

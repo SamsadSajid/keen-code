@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -244,7 +245,7 @@ func (c *GenkitClient) StreamChat(
 		hasNewToolTurns := false
 
 		var genkitTools []ai.ToolRef
-		if toolRegistry != nil && toolRegistry.Count() > 0 {
+		if !streamOpts.DisableToolCalls && toolRegistry != nil && toolRegistry.Count() > 0 {
 			genkitTools = ToGenkitTools(toolRegistry)
 		}
 
@@ -316,13 +317,15 @@ func (c *GenkitClient) StreamChat(
 				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
+			if streamOpts.DisableToolCalls {
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: errors.New(toolCallsDisabledMessage)}
+				return
+			}
 
 			aiMessages = append(aiMessages, modelResponse.Message)
 
 			execRegistry := toolRegistry
-			if streamOpts.DisableToolCalls {
-				execRegistry = denyToolRegistry(toolRegistry)
-			} else if streamOpts.DisableWriteToolCalls {
+			if streamOpts.DisableWriteToolCalls {
 				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolResponseParts, activities := c.executeTools(ctx, toolRequests, execRegistry, eventCh)

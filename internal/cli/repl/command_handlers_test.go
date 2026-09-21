@@ -2175,7 +2175,8 @@ func TestHandleModeCommandCoversStatusChangesAndValidation(t *testing.T) {
 		{input: replcommands.Mode + " plan", wantMode: llm.ModePlan},
 		{input: replcommands.Mode + " build", wantMode: llm.ModeBuild},
 		{input: replcommands.Mode + " yolo", wantMode: llm.ModeYolo},
-		{input: replcommands.Mode + " invalid", wantMode: llm.ModeBuild, wantText: "Usage: /mode plan|build|yolo"},
+		{input: replcommands.Mode + " auto", wantMode: llm.ModeAuto},
+		{input: replcommands.Mode + " invalid", wantMode: llm.ModeBuild, wantText: "Usage: /mode plan|build|yolo|auto"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -2188,6 +2189,14 @@ func TestHandleModeCommandCoversStatusChangesAndValidation(t *testing.T) {
 				t.Fatalf("output %q missing %q", result.output.Join(), tt.wantText)
 			}
 		})
+	}
+}
+
+func TestDispatchCommandAutoSelectsAutoMode(t *testing.T) {
+	m := newTestModel()
+	result, _, handled := m.dispatchCommand(replcommands.Auto)
+	if !handled || result.currentMode() != llm.ModeAuto || result.appState.Mode() != llm.ModeAuto {
+		t.Fatalf("/auto = handled:%v mode:%q app:%q", handled, result.currentMode(), result.appState.Mode())
 	}
 }
 

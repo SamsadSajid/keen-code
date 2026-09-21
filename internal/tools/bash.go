@@ -16,6 +16,7 @@ const (
 	outputPreviewHeadSize   = 32 * 1024
 	outputPreviewTailSize   = 16 * 1024
 	truncatedOutputFileMode = 0600
+	maxApprovalCommandSize  = 4 * 1024
 )
 
 type BashTool struct {
@@ -130,7 +131,14 @@ func (t *BashTool) Execute(ctx context.Context, input any) (any, error) {
 		}
 	}
 
+	workingDir, err := t.guard.ResolvePath(".")
+	if err != nil {
+		return nil, fmt.Errorf("path resolution failed: %w", err)
+	}
 	permission := t.guard.CheckPath(".", "read")
+	if autoModeEnabled(t.permissionRequester) {
+		permission = t.guard.CheckAutoPath(".", "read")
+	}
 
 	switch permission {
 	case filesystem.PermissionDenied:
@@ -139,8 +147,7 @@ func (t *BashTool) Execute(ctx context.Context, input any) (any, error) {
 		if t.permissionRequester == nil {
 			return nil, fmt.Errorf("permission denied: user approval required but not available")
 		}
-		resolvedPath, _ := t.guard.ResolvePath(".")
-		allowed, err := t.permissionRequester.RequestPermission(ctx, t.Name(), ".", resolvedPath, false)
+		allowed, err := t.permissionRequester.RequestPermission(ctx, t.Name(), ".", workingDir, false)
 		if err != nil {
 			return nil, fmt.Errorf("permission request failed: %w", err)
 		}
@@ -149,7 +156,8 @@ func (t *BashTool) Execute(ctx context.Context, input any) (any, error) {
 		}
 	}
 
-	if isDangerous || IsDangerousCommand(command) {
+	autoReview := autoModeEnabled(t.permissionRequester)
+	if isDangerous || IsDangerousCommand(command) || (autoReview && len(command) > maxApprovalCommandSize) {
 		if t.permissionRequester == nil {
 			return nil, fmt.Errorf("permission denied: user approval required for dangerous command but not available")
 		}
@@ -160,16 +168,37 @@ func (t *BashTool) Execute(ctx context.Context, input any) (any, error) {
 		if !allowed {
 			return nil, fmt.Errorf("permission denied by user: dangerous command execution rejected")
 		}
+	} else {
+		decision, err := reviewOperation(ctx, t.permissionRequester, Operation{Kind: BashToolName, Path: workingDir, Command: command})
+		if err != nil && ctx.Err() != nil {
+			return nil, err
+		}
+		if (autoReview && decision != OperationReviewApproved) || (!autoReview && decision == OperationReviewAskUser) {
+			if t.permissionRequester == nil {
+				return nil, fmt.Errorf("permission denied: user approval required but not available")
+			}
+			allowed, err := requestManualPermission(ctx, t.permissionRequester, t.Name(), command, "", false)
+			if err != nil {
+				return nil, fmt.Errorf("permission request failed: %w", err)
+			}
+			if !allowed {
+				return nil, fmt.Errorf("permission denied by user: bash execution rejected")
+			}
+		}
 	}
 
-	return t.executeCommand(ctx, command, summary)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return t.executeCommand(ctx, command, summary, workingDir)
 }
 
-func (t *BashTool) executeCommand(ctx context.Context, command, summary string) (any, error) {
+func (t *BashTool) executeCommand(ctx context.Context, command, summary, workingDir string) (any, error) {
 	ctx, cancel := context.WithTimeout(ctx, bashTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd.Dir = workingDir
 
 	stdout, err := cmd.Output()
 

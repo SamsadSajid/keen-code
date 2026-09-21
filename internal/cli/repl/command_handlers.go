@@ -74,6 +74,13 @@ func (m *replModel) dispatchCommand(input string) (replModel, tea.Cmd, bool) {
 		m.textarea.Reset()
 		result := m.handleModeCommand(input)
 		return result, nil, true
+	case input == replcommands.Auto:
+		m.setMode(llm.ModeAuto)
+		m.output.AddStyledLine("  Mode: auto", repltheme.HighlightStyle)
+		m.output.AddEmptyLine()
+		m.updateViewportContent()
+		m.viewport.GotoBottom()
+		return *m, nil, true
 	case input == replcommands.Logout:
 		m.textarea.Reset()
 		result := m.handleLogoutCommand()
@@ -425,10 +432,12 @@ func (m *replModel) handleModeCommand(input string) replModel {
 		m.setMode(llm.ModeBuild)
 	case "yolo":
 		m.setMode(llm.ModeYolo)
+	case "auto":
+		m.setMode(llm.ModeAuto)
 	case "":
-		m.output.AddStyledLine("  Mode: "+string(m.currentMode())+" (use /mode plan|build|yolo)", repltheme.HighlightStyle)
+		m.output.AddStyledLine("  Mode: "+string(m.currentMode())+" (use /mode plan|build|yolo|auto)", repltheme.HighlightStyle)
 	default:
-		m.output.AddError("Usage: /mode plan|build|yolo", repltheme.ErrorStyle)
+		m.output.AddError("Usage: /mode plan|build|yolo|auto", repltheme.ErrorStyle)
 	}
 
 	m.output.AddEmptyLine()

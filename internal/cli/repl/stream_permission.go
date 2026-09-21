@@ -41,7 +41,7 @@ func (sh *StreamHandler) MovePendingCursor(delta int) {
 	if seg.kind != segmentPermission || seg.permissionReq == nil {
 		return
 	}
-	choices := replpermissions.Choices(seg.permissionReq.IsDangerous)
+	choices := replpermissions.Choices(seg.permissionReq.IsDangerous || seg.permissionReq.SingleOperation)
 	newCursor := seg.permissionCursor + delta
 	if newCursor < 0 {
 		newCursor = 0
@@ -61,7 +61,7 @@ func (sh *StreamHandler) GetPendingChoice() replpermissions.Choice {
 	if seg.kind != segmentPermission || seg.permissionReq == nil {
 		return replpermissions.ChoiceDeny
 	}
-	return replpermissions.ChoiceAt(seg.permissionCursor, seg.permissionReq.IsDangerous)
+	return replpermissions.ChoiceAt(seg.permissionCursor, seg.permissionReq.IsDangerous || seg.permissionReq.SingleOperation)
 }
 
 func (sh *StreamHandler) GetPendingPermissionRequest() *replpermissions.Request {
@@ -158,7 +158,7 @@ func renderPermissionCard(seg *streamSegment, width int) []string {
 
 	sb.WriteString("\n")
 
-	choices := replpermissions.Choices(req.IsDangerous)
+	choices := replpermissions.Choices(req.IsDangerous || req.SingleOperation)
 	for i, choice := range choices {
 		if i == seg.permissionCursor {
 			sb.WriteString(wrapTextWithStyle("▶ "+choice, repltheme.UserPromptSelectionStyle, contentWidth))

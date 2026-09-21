@@ -441,6 +441,40 @@ func TestBedrockClient_StreamChat_ToolLoop(t *testing.T) {
 	}
 }
 
+func TestBedrockClient_DisableToolCallsStopsToolUse(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(&successTool{}); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	var captured *bedrockruntime.ConverseStreamInput
+	client := &BedrockClient{model: "global.anthropic.claude-sonnet-4-6"}
+	client.streamImpl = func(_ context.Context, params *bedrockruntime.ConverseStreamInput) (bedrockStream, error) {
+		calls++
+		captured = params
+		return &mockBedrockStream{events: []brtypes.ConverseStreamOutput{makeBedrockToolUseStart(0, "toolu_01", "success_tool"), makeBedrockToolUseDelta(0, `{}`), makeBedrockContentBlockStop(0)}}, nil
+	}
+	events, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, registry, core.StreamOptions{DisableToolCalls: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var terminal error
+	for event := range events {
+		if event.Type == core.StreamEventTypeError {
+			terminal = event.Error
+		}
+		if event.Type == core.StreamEventTypeToolStart || event.Type == core.StreamEventTypeToolEnd {
+			t.Fatal("unexpected tool activity")
+		}
+	}
+	if calls != 1 || terminal == nil || terminal.Error() != toolCallsDisabledMessage {
+		t.Fatalf("calls=%d error=%v", calls, terminal)
+	}
+	if captured.ToolConfig != nil {
+		t.Fatal("disabled request advertised tools")
+	}
+}
+
 func TestBedrockClient_StreamError(t *testing.T) {
 	c := &BedrockClient{model: "global.anthropic.claude-sonnet-4-6", maxRetries: 1}
 	c.streamImpl = func(ctx context.Context, params *bedrockruntime.ConverseStreamInput) (bedrockStream, error) {

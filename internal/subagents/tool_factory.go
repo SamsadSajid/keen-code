@@ -8,10 +8,32 @@ import (
 	"github.com/mochow13/keen-code/internal/tools"
 )
 
-type AutoApprover struct{}
+type AutoApprover struct{ Parent tools.PermissionRequester }
 
-func (AutoApprover) RequestPermission(context.Context, string, string, string, bool) (bool, error) {
+func (a AutoApprover) RequestPermission(ctx context.Context, tool, path, resolved string, dangerous bool) (bool, error) {
+	if state, ok := a.Parent.(interface{ AutoModeEnabled() bool }); ok && state.AutoModeEnabled() {
+		return a.Parent.RequestPermission(ctx, tool, path, resolved, dangerous)
+	}
 	return true, nil
+}
+
+func (a AutoApprover) AutoModeEnabled() bool {
+	state, ok := a.Parent.(interface{ AutoModeEnabled() bool })
+	return ok && state.AutoModeEnabled()
+}
+
+func (a AutoApprover) RequestManualPermission(ctx context.Context, tool, path, resolved string, dangerous bool) (bool, error) {
+	if manual, ok := a.Parent.(tools.ManualPermissionRequester); ok {
+		return manual.RequestManualPermission(ctx, tool, path, resolved, dangerous)
+	}
+	return a.RequestPermission(ctx, tool, path, resolved, dangerous)
+}
+
+func (a AutoApprover) ReviewOperation(ctx context.Context, operation tools.Operation) (tools.OperationReviewDecision, error) {
+	if reviewer, ok := a.Parent.(tools.OperationReviewer); ok {
+		return reviewer.ReviewOperation(ctx, operation)
+	}
+	return tools.OperationReviewNotRequired, nil
 }
 
 type NoopDiffEmitter struct{}
@@ -19,8 +41,9 @@ type NoopDiffEmitter struct{}
 func (NoopDiffEmitter) EmitDiff([]tools.EditDiffLine) {}
 
 type ToolFactory struct {
-	Guard      *filesystem.Guard
-	MCPRuntime keenmcp.Runtime
+	Guard           *filesystem.Guard
+	MCPRuntime      keenmcp.Runtime
+	ParentRequester tools.PermissionRequester
 }
 
 func (f ToolFactory) Registry(profile Profile, parent *tools.Registry) *tools.Registry {
@@ -28,7 +51,7 @@ func (f ToolFactory) Registry(profile Profile, parent *tools.Registry) *tools.Re
 	if f.Guard == nil {
 		return registry
 	}
-	approver := AutoApprover{}
+	approver := AutoApprover{Parent: f.ParentRequester}
 	available := map[string]tools.Tool{
 		tools.ReadFileToolName:  tools.NewReadFileTool(f.Guard, approver),
 		tools.GlobToolName:      tools.NewGlobTool(f.Guard, approver),

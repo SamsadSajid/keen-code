@@ -350,7 +350,7 @@ func TestSetModeYoloSyncsAppStateAndRequester(t *testing.T) {
 
 func TestToggleModeCyclesBuildPlanYolo(t *testing.T) {
 	m := newTestModel()
-	want := []llm.AgentMode{llm.ModePlan, llm.ModeYolo, llm.ModeBuild}
+	want := []llm.AgentMode{llm.ModePlan, llm.ModeYolo, llm.ModeAuto, llm.ModeBuild}
 	for _, mode := range want {
 		m.toggleMode()
 		if got := m.currentMode(); got != mode {

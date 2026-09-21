@@ -24,7 +24,8 @@ Keen Code provides slash commands (prefixed with `/`) for controlling the agent.
 | `/cleanup` | Remove expired Keen data and trim input history |
 | `/memory` or `/memory show` | Show memory file locations; `show` includes their contents |
 | `/mcp [status\|connect <server>]` | Show MCP server status or connect a configured server |
-| `/mode [plan\|build\|yolo]` | Show or switch the agent mode |
+| `/auto` | Select auto mode |
+| `/mode [plan\|build\|auto\|yolo]` | Show or switch the agent mode |
 | `/subagents [list]` | List available subagent profiles |
 | `/tool-history [full\|none]` | Show or control whether future tool outputs are retained between turns |
 | `/clear` or `/new` | Clear the current session and start a new one |
@@ -112,14 +113,15 @@ Navigation:
 API keys are masked while typed. If an API key already exists for the provider, press `Enter` on an empty API-key prompt to keep it.
 
 Custom HTTP headers for a provider can be configured by editing `~/.keen/configs.json` directly. See [`docs/ai-providers.md`](ai-providers.md#custom-headers).
-## `/mode [plan|build|yolo]`
+## `/mode [plan|build|auto|yolo]`
 
-Shows or switches the agent mode. Bare `/mode` prints the current mode; `/mode <name>` switches to `plan`, `build`, or `yolo` and prints a `Mode:` status line. An invalid name prints `Usage: /mode plan|build|yolo` and keeps the current mode.
+Use `/mode` to show the current mode. Use `/mode <name>` to select `plan`, `build`, `auto`, or `yolo`. An invalid name shows usage and keeps the current mode.
 
 ```text
 /mode
 /mode plan
 /mode build
+/mode auto
 /mode yolo
 ```
 
@@ -127,8 +129,9 @@ Behavior:
 
 - `build` (default) has the full tool registry with normal permission prompts.
 - `plan` is read-only: write/edit tools are stripped, so the model must describe a plan first. `/mode build` exits plan mode.
+- `auto` uses a small approval subagent for eligible shell commands and file changes. `/auto` selects the same mode. Hard filesystem denials remain in effect. Risky operations and review failures use a manual prompt. Read the [auto mode guide](../docs.md).
 - `yolo` is approval-less `build`: the full tool registry with all permission prompts skipped, including the dangerous-`bash` prompt (see [Permission System](permission-system.md)). The input area turns red as a reminder. `/mode build` exits yolo mode and restores normal prompting.
-- `Shift+Tab` cycles `build` → `plan` → `yolo` → `build`.
+- `Shift+Tab` cycles through the available modes.
 - `/clear` and `/new` preserve the current mode.
 
 ## `/allow-permission <tool_names...>`

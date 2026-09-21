@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -679,7 +680,11 @@ func (c *AnthropicClient) StreamChat(
 			msgParams, injectedPending = c.injectPendingState(msgParams)
 		}
 		turnStartLen := len(msgParams)
-		anthropicTools := toAnthropicTools(toolRegistry)
+		requestRegistry := toolRegistry
+		if streamOpts.DisableToolCalls {
+			requestRegistry = nil
+		}
+		anthropicTools := toAnthropicTools(requestRegistry)
 		requestOpts := c.requestOptions(streamOpts)
 		compactionHistory := core.CloneMessages(messages)
 		autoCompactOff := false
@@ -754,13 +759,15 @@ func (c *AnthropicClient) StreamChat(
 				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
+			if streamOpts.DisableToolCalls {
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: errors.New(toolCallsDisabledMessage)}
+				return
+			}
 
 			msgParams = append(msgParams, anthropic.NewAssistantMessage(assistantBlocks...))
 
 			execRegistry := toolRegistry
-			if streamOpts.DisableToolCalls {
-				execRegistry = denyToolRegistry(toolRegistry)
-			} else if streamOpts.DisableWriteToolCalls {
+			if streamOpts.DisableWriteToolCalls {
 				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolResultBlocks, activities := c.executeTools(ctx, toolUses, execRegistry, eventCh)

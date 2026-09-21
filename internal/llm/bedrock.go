@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -270,7 +271,11 @@ func (c *BedrockClient) StreamChat(
 			msgParams, injectedPending = c.injectPendingState(msgParams)
 		}
 		turnStartLen := len(msgParams)
-		toolConfig := toBedrockTools(toolRegistry)
+		requestRegistry := toolRegistry
+		if streamOpts.DisableToolCalls {
+			requestRegistry = nil
+		}
+		toolConfig := toBedrockTools(requestRegistry)
 		compactionHistory := core.CloneMessages(messages)
 		autoCompactOff := false
 		forcedRecoveryUsed := false
@@ -344,15 +349,17 @@ func (c *BedrockClient) StreamChat(
 				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
+			if streamOpts.DisableToolCalls {
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: errors.New(toolCallsDisabledMessage)}
+				return
+			}
 
 			msgParams = append(msgParams, brtypes.Message{
 				Role:    brtypes.ConversationRoleAssistant,
 				Content: assistantBlocks,
 			})
 			execRegistry := toolRegistry
-			if streamOpts.DisableToolCalls {
-				execRegistry = denyToolRegistry(toolRegistry)
-			} else if streamOpts.DisableWriteToolCalls {
+			if streamOpts.DisableWriteToolCalls {
 				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolResults, activities := c.executeTools(ctx, toolUses, execRegistry, eventCh)

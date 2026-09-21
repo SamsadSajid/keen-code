@@ -1,10 +1,12 @@
 package repl
 
 import (
+	"context"
 	"errors"
 	"github.com/mochow13/keen-code/internal/llm/core"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -1293,7 +1295,19 @@ func TestHandleKeyMsg_PermissionEnter_AllowSession(t *testing.T) {
 	eventCh := make(chan core.StreamEvent)
 	m.stream.handler.Start(eventCh, "Loading...")
 
-	req := makeTestPermissionRequest(false)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result := make(chan bool, 1)
+	go func() {
+		allowed, _ := m.permissionRequester.RequestPermission(ctx, "read_file", "file", "file", false)
+		result <- allowed
+	}()
+	var req *replpermissions.Request
+	select {
+	case req = <-m.permissionRequester.GetRequestChan():
+	case <-ctx.Done():
+		t.Fatal("permission request did not arrive")
+	}
 	m.stream.handler.HandlePermissionRequest(req)
 
 	m.handleKeyMsg(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -1304,6 +1318,9 @@ func TestHandleKeyMsg_PermissionEnter_AllowSession(t *testing.T) {
 	}
 	if !newM.permissionRequester.IsSessionAllowed("read_file") {
 		t.Error("expected read_file to be session-allowed after AllowSession choice")
+	}
+	if !<-result {
+		t.Fatal("manual session choice did not permit the operation")
 	}
 }
 

@@ -209,7 +209,21 @@ Dangerous commands include:
 - Process termination
 - System modifications
 
-Non-dangerous bash commands are auto-granted when the working directory check passes. The only interactive prompt for `bash` is the dangerous-command prompt.
+In build mode, non-dangerous Bash commands run when the working directory check passes. In auto mode, an approval subagent also reviews eligible commands before execution.
+
+## Auto Mode
+
+Use `/auto` or `/mode auto` to select auto mode. The approval subagent reviews
+eligible shell commands and file changes after the filesystem guard check.
+It has no tools and receives no conversation history. A model grant applies
+to one operation. It does not create a session or project grant.
+
+Sensitive paths, external paths, detected secrets, large changes, and MCP
+calls need manual review. If the model cannot approve an operation, Keen
+uses the manual prompt. A hard guard denial remains final.
+
+Read [the usage guide](../docs.md) and [the architecture](../arch.md) for
+the limits and trade-offs.
 
 ## Project-Level Allow List
 

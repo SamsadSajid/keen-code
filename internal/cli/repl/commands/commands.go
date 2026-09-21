@@ -21,6 +21,7 @@ const (
 	MCPConnect      = "/mcp connect"
 	MCPStatus       = "/mcp status"
 	Mode            = "/mode"
+	Auto            = "/auto"
 	New             = "/new"
 	AllowPermission = "/allow-permission"
 	ResetPermission = "/reset-permission"
@@ -61,6 +62,7 @@ var All = []SlashCommand{
 	{MCP, "Show MCP status or refresh a server"},
 	{Model, "Change provider or model stored in ~/.keen/configs.json"},
 	{Mode, "Switch agent mode (plan|build|yolo)"},
+	{Auto, "Switch to automatic approval mode"},
 	{New, "Start a new session (also /clear)"},
 	{ResetPermission, "Reset tool permissions to Keen's default mechanism"},
 	{Resume, "Resume the last session directly"},
@@ -92,6 +94,7 @@ var Suggestions = []SlashCommand{
 	{MCPStatus, "Show MCP server status"},
 	{Model, "Change provider or model stored in ~/.keen/configs.json"},
 	{Mode, "Switch agent mode (plan|build|yolo)"},
+	{Auto, "Switch to automatic approval mode"},
 	{New, "Start a new session (also /clear)"},
 	{ResetPermission, "Reset tool permissions to Keen's default mechanism"},
 	{Resume, "Resume the last session directly"},

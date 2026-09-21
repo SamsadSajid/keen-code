@@ -1299,10 +1299,7 @@ func TestOpenAICompatibleClient_DisableToolCallsRejectsToolUse(t *testing.T) {
 	client.streamImpl = func(ctx context.Context, params openai.ChatCompletionNewParams, opts ...option.RequestOption) chatStream {
 		callCount++
 		seenParams = append(seenParams, params)
-		if callCount == 1 {
-			return &fakeChatStream{chunks: []openai.ChatCompletionChunk{makeToolCallChunk()}}
-		}
-		return &fakeChatStream{chunks: []openai.ChatCompletionChunk{makeContentChunk("summary from history")}}
+		return &fakeChatStream{chunks: []openai.ChatCompletionChunk{makeToolCallChunk()}}
 	}
 
 	registry := tools.NewRegistry()
@@ -1315,33 +1312,23 @@ func TestOpenAICompatibleClient_DisableToolCallsRejectsToolUse(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var toolEnds []core.ToolCall
-	var text string
+	var terminalErr error
 	for event := range eventCh {
 		switch event.Type {
-		case core.StreamEventTypeChunk:
-			text += event.Content
-		case core.StreamEventTypeToolEnd:
-			toolEnds = append(toolEnds, *event.ToolCall)
 		case core.StreamEventTypeError:
-			t.Fatalf("unexpected error: %v", event.Error)
+			terminalErr = event.Error
+		case core.StreamEventTypeToolStart, core.StreamEventTypeToolEnd:
+			t.Fatalf("disabled request emitted tool activity: %#v", event)
 		}
 	}
 
-	if callCount != 2 {
-		t.Fatalf("expected 2 stream calls, got %d", callCount)
+	if callCount != 1 {
+		t.Fatalf("expected one stream call, got %d", callCount)
 	}
-	if len(toolEnds) != 1 || toolEnds[0].Error != toolCallsDisabledMessage || toolEnds[0].Output != nil {
-		t.Fatalf("expected a rejected tool end without output, got %#v", toolEnds)
+	if terminalErr == nil || terminalErr.Error() != toolCallsDisabledMessage {
+		t.Fatalf("expected disabled tool error, got %v", terminalErr)
 	}
-	if text != "summary from history" {
-		t.Fatalf("expected summary after rejection, got %q", text)
-	}
-	body, err := json.Marshal(seenParams[1])
-	if err != nil {
-		t.Fatalf("marshal params: %v", err)
-	}
-	if !strings.Contains(string(body), toolCallsDisabledMessage) {
-		t.Fatalf("expected rejection message in follow-up request, got %s", string(body))
+	if len(seenParams) != 1 || len(seenParams[0].Tools) != 0 {
+		t.Fatalf("disabled request advertised tools: %#v", seenParams)
 	}
 }

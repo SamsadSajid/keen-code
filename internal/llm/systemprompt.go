@@ -15,6 +15,7 @@ const (
 	ModeBuild AgentMode = "build"
 	ModePlan  AgentMode = "plan"
 	ModeYolo  AgentMode = "yolo"
+	ModeAuto  AgentMode = "auto"
 )
 
 const sharedPrompt = `You are Keen Code, an expert terminal-based coding agent for software engineering tasks.

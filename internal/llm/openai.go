@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -506,7 +507,11 @@ func (c *OpenAICompatibleClient) StreamChat(
 
 		turnStartLen := len(oaiMessages)
 
-		oaiTools := toOpenAITools(toolRegistry)
+		requestRegistry := toolRegistry
+		if streamOpts.DisableToolCalls {
+			requestRegistry = nil
+		}
+		oaiTools := toOpenAITools(requestRegistry)
 		requestOpts := c.requestOptions(streamOpts)
 
 		compactionHistory := core.CloneMessages(messages)
@@ -581,15 +586,17 @@ func (c *OpenAICompatibleClient) StreamChat(
 				eventCh <- core.StreamEvent{Type: core.StreamEventTypeDone}
 				return
 			}
+			if streamOpts.DisableToolCalls {
+				eventCh <- core.StreamEvent{Type: core.StreamEventTypeError, Error: errors.New(toolCallsDisabledMessage)}
+				return
+			}
 
 			oaiMessages = append(oaiMessages, openai.ChatCompletionMessageParamUnion{
 				OfAssistant: &assistant,
 			})
 
 			execRegistry := toolRegistry
-			if streamOpts.DisableToolCalls {
-				execRegistry = denyToolRegistry(toolRegistry)
-			} else if streamOpts.DisableWriteToolCalls {
+			if streamOpts.DisableWriteToolCalls {
 				execRegistry = denyWriteToolRegistry(toolRegistry)
 			}
 			toolMsgs, activities := c.executeTools(ctx, toolCalls, execRegistry, eventCh)

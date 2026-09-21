@@ -519,6 +519,37 @@ func TestGenkitClient_StreamChat_ToolInvocation(t *testing.T) {
 	}
 }
 
+func TestGenkitClient_DisableToolCallsStopsToolUse(t *testing.T) {
+	client := &GenkitClient{g: &genkit.Genkit{}, provider: providerconfig.Provider(config.ProviderGoogleAI), model: "googleai/gemini-pro"}
+	var calls int
+	client.streamImpl = func(_ context.Context, _ *genkit.Genkit, _ ...ai.GenerateOption) iter.Seq2[*ai.ModelStreamValue, error] {
+		return func(yield func(*ai.ModelStreamValue, error) bool) {
+			calls++
+			yield(&ai.ModelStreamValue{Done: true, Response: &ai.ModelResponse{Message: &ai.Message{Role: ai.RoleModel, Content: []*ai.Part{ai.NewToolRequestPart(&ai.ToolRequest{Name: "success_tool", Input: map[string]any{}, Ref: "ref-1"})}}}}, nil)
+		}
+	}
+	registry := tools.NewRegistry()
+	if err := registry.Register(&successTool{}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, registry, core.StreamOptions{DisableToolCalls: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var terminal error
+	for event := range events {
+		if event.Type == core.StreamEventTypeError {
+			terminal = event.Error
+		}
+		if event.Type == core.StreamEventTypeToolStart || event.Type == core.StreamEventTypeToolEnd {
+			t.Fatal("unexpected tool activity")
+		}
+	}
+	if calls != 1 || terminal == nil || terminal.Error() != toolCallsDisabledMessage {
+		t.Fatalf("calls=%d error=%v", calls, terminal)
+	}
+}
+
 func TestGenkitClient_executeTools_Error(t *testing.T) {
 	client := &GenkitClient{}
 

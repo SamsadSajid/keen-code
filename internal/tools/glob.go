@@ -105,6 +105,9 @@ func (t *GlobTool) Execute(ctx context.Context, input any) (any, error) {
 	}
 
 	permission := t.guard.CheckPath(resolvedBasePath, "read")
+	if autoModeEnabled(t.permissionRequester) {
+		permission = t.guard.CheckAutoPath(resolvedBasePath, "read")
+	}
 
 	switch permission {
 	case filesystem.PermissionDenied:
@@ -122,7 +125,7 @@ func (t *GlobTool) Execute(ctx context.Context, input any) (any, error) {
 		}
 	}
 
-	files, err := t.searchFiles(resolvedBasePath, pattern)
+	files, err := t.searchFiles(resolvedBasePath, pattern, autoModeEnabled(t.permissionRequester) && permission == filesystem.PermissionGranted)
 	if err != nil {
 		return nil, err
 	}
@@ -132,13 +135,20 @@ func (t *GlobTool) Execute(ctx context.Context, input any) (any, error) {
 	}, nil
 }
 
-func (t *GlobTool) searchFiles(basePath, pattern string) ([]string, error) {
+func (t *GlobTool) searchFiles(basePath, pattern string, autoFilter bool) ([]string, error) {
 	var matches []string
 	seen := make(map[string]bool)
 
 	err := filepath.WalkDir(basePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+
+		if autoFilter && t.guard.CheckAutoPath(path, "read") != filesystem.PermissionGranted {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 
 		if d.IsDir() {

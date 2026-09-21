@@ -213,6 +213,40 @@ func TestOpenAIResponsesClient_StreamChat_ToolLoop(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesClient_DisableToolCallsStopsToolUse(t *testing.T) {
+	client := &OpenAIResponsesClient{provider: providerconfig.Provider(config.ProviderOpenAI), model: "gpt-5.4"}
+	var calls int
+	var captured responses.ResponseNewParams
+	client.responseStreamImpl = func(_ context.Context, params responses.ResponseNewParams, _ ...option.RequestOption) responseStream {
+		calls++
+		captured = params
+		return &fakeResponseStream{events: []responses.ResponseStreamEventUnion{mustResponseEvent(t, `{"type":"response.completed","sequence_number":1,"response":{"id":"resp_1","created_at":0,"metadata":{},"model":"gpt-5.4","object":"response","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"success_tool","arguments":"{}","status":"completed"}],"parallel_tool_calls":false,"temperature":1,"tool_choice":"auto","tools":[],"top_p":1}}`)}}
+	}
+	registry := tools.NewRegistry()
+	if err := registry.Register(&successToolOAI{}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := client.StreamChat(context.Background(), []core.Message{{Role: core.RoleUser, Content: "hi"}}, registry, core.StreamOptions{DisableToolCalls: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var terminal error
+	for event := range events {
+		if event.Type == core.StreamEventTypeError {
+			terminal = event.Error
+		}
+		if event.Type == core.StreamEventTypeToolStart || event.Type == core.StreamEventTypeToolEnd {
+			t.Fatal("unexpected tool activity")
+		}
+	}
+	if calls != 1 || terminal == nil || terminal.Error() != toolCallsDisabledMessage {
+		t.Fatalf("calls=%d error=%v", calls, terminal)
+	}
+	if len(captured.Tools) != 0 {
+		t.Fatal("disabled request advertised tools")
+	}
+}
+
 func TestOpenAIResponsesClient_StreamChat_ReplaysAssistantMessageBeforeTools(t *testing.T) {
 	client := &OpenAIResponsesClient{
 		provider:   providerconfig.Provider(config.ProviderOpenAI),

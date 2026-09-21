@@ -116,11 +116,12 @@ func (t *GrepTool) Execute(ctx context.Context, input any) (any, error) {
 		return nil, fmt.Errorf("path resolution failed: %w", err)
 	}
 
-	if err := t.checkPermission(ctx, config.basePath, resolvedPath); err != nil {
+	permission, err := t.checkPermission(ctx, config.basePath, resolvedPath)
+	if err != nil {
 		return nil, err
 	}
 
-	result, err := t.searchFiles(resolvedPath, config)
+	result, err := t.searchFiles(resolvedPath, config, autoModeEnabled(t.permissionRequester) && permission == filesystem.PermissionGranted)
 	if err != nil {
 		return nil, err
 	}
@@ -228,17 +229,20 @@ func (t *GrepTool) extractOutputMode(params map[string]any) (string, error) {
 	}
 }
 
-func (t *GrepTool) checkPermission(ctx context.Context, basePath, resolvedPath string) error {
+func (t *GrepTool) checkPermission(ctx context.Context, basePath, resolvedPath string) (filesystem.Permission, error) {
 	permission := t.guard.CheckPath(resolvedPath, "read")
+	if autoModeEnabled(t.permissionRequester) {
+		permission = t.guard.CheckAutoPath(resolvedPath, "read")
+	}
 
 	switch permission {
 	case filesystem.PermissionDenied:
-		return fmt.Errorf("permission denied by policy: path %q is blocked", basePath)
+		return permission, fmt.Errorf("permission denied by policy: path %q is blocked", basePath)
 	case filesystem.PermissionPending:
-		return t.requestPermission(ctx, basePath, resolvedPath)
+		return permission, t.requestPermission(ctx, basePath, resolvedPath)
 	}
 
-	return nil
+	return permission, nil
 }
 
 func (t *GrepTool) requestPermission(ctx context.Context, basePath, resolvedPath string) error {
@@ -258,13 +262,14 @@ func (t *GrepTool) requestPermission(ctx context.Context, basePath, resolvedPath
 	return nil
 }
 
-func (t *GrepTool) searchFiles(basePath string, config *searchConfig) (*searchResult, error) {
+func (t *GrepTool) searchFiles(basePath string, config *searchConfig, autoFilter bool) (*searchResult, error) {
 	searcher := &fileSearcher{
 		guard:      t.guard,
 		basePath:   basePath,
 		config:     config,
 		result:     &searchResult{},
 		matchLimit: maxMatchLimit,
+		autoMode:   autoFilter,
 	}
 
 	err := filepath.WalkDir(basePath, searcher.walkFn)
@@ -281,6 +286,7 @@ type fileSearcher struct {
 	config     *searchConfig
 	result     *searchResult
 	matchLimit int
+	autoMode   bool
 }
 
 func (s *fileSearcher) walkFn(path string, d fs.DirEntry, err error) error {
@@ -296,6 +302,9 @@ func (s *fileSearcher) walkFn(path string, d fs.DirEntry, err error) error {
 }
 
 func (s *fileSearcher) handleDirectory(path string) error {
+	if s.autoMode && s.guard.CheckAutoPath(path, "read") != filesystem.PermissionGranted {
+		return fs.SkipDir
+	}
 	if s.guard.IsBlocked(path) {
 		return fs.SkipDir
 	}
@@ -303,6 +312,9 @@ func (s *fileSearcher) handleDirectory(path string) error {
 }
 
 func (s *fileSearcher) handleFile(path string) error {
+	if s.autoMode && s.guard.CheckAutoPath(path, "read") != filesystem.PermissionGranted {
+		return nil
+	}
 	if s.guard.IsBlocked(path) {
 		return nil
 	}

@@ -99,25 +99,31 @@ func (t *WriteFileTool) Execute(ctx context.Context, input any) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("path resolution failed: %w", err)
 	}
+	permission := t.guard.CheckPath(path, "write")
+	if autoModeEnabled(t.permissionRequester) {
+		permission = t.guard.CheckAutoPath(path, "write")
+	}
+	if permission == filesystem.PermissionDenied {
+		return nil, fmt.Errorf("permission denied by policy: path %q is blocked", path)
+	}
 
 	oldContent := ""
+	exists := false
 	if data, err := os.ReadFile(resolvedPath); err == nil {
 		oldContent = string(data)
+		exists = true
 	}
 
 	if t.diffEmitter != nil {
 		t.diffEmitter.EmitDiff(computeEditDiff(oldContent, content))
 	}
 
-	permission := t.guard.CheckPath(path, "write")
-
 	if t.guard.IsMemoryPath(resolvedPath) && memory.ContainsSecret(content) {
 		return nil, fmt.Errorf("refusing to write memory file: content appears to contain a secret, token, or credential")
 	}
+	autoApproved := false
 
 	switch permission {
-	case filesystem.PermissionDenied:
-		return nil, fmt.Errorf("permission denied by policy: path %q is blocked", path)
 	case filesystem.PermissionPending:
 		if t.permissionRequester == nil {
 			return nil, fmt.Errorf("permission denied: user approval required but not available")
@@ -129,14 +135,50 @@ func (t *WriteFileTool) Execute(ctx context.Context, input any) (any, error) {
 		if !allowed {
 			return nil, fmt.Errorf("permission denied by user: write access rejected for path %q", path)
 		}
+	case filesystem.PermissionGranted:
+		change := formatEditDiff(computeEditDiff(oldContent, content))
+		decision, reviewErr := reviewOperation(ctx, t.permissionRequester, Operation{Kind: WriteFileToolName, Path: resolvedPath, Content: change, Exists: exists, Bytes: len(content)})
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if reviewErr != nil || decision != OperationReviewApproved {
+			if t.permissionRequester == nil {
+				return nil, fmt.Errorf("permission denied: user approval required but not available")
+			}
+			allowed, err := requestManualPermission(ctx, t.permissionRequester, t.Name(), path, resolvedPath, false)
+			if err != nil {
+				return nil, fmt.Errorf("permission request failed: %w", err)
+			}
+			if !allowed {
+				return nil, fmt.Errorf("permission denied by user: write access rejected for path %q", path)
+			}
+		} else if decision == OperationReviewApproved && !fileStateMatches(resolvedPath, oldContent, exists) {
+			return nil, fmt.Errorf("file changed during approval review")
+		} else {
+			autoApproved = true
+		}
 	}
 
+	if autoApproved && t.guard.CheckAutoPath(path, "write") != filesystem.PermissionGranted {
+		return nil, fmt.Errorf("permission denied: target changed and requires user approval")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	created, err := writeFileContent(resolvedPath, content)
 	if err != nil {
 		return nil, err
 	}
 
 	return map[string]any{"created": created}, nil
+}
+
+func fileStateMatches(path, content string, exists bool) bool {
+	data, err := os.ReadFile(path)
+	if !exists {
+		return os.IsNotExist(err)
+	}
+	return err == nil && string(data) == content
 }
 
 func writeFileContent(path string, content string) (bool, error) {

@@ -185,6 +185,9 @@ func (t *EditFileTool) Execute(ctx context.Context, input any) (any, error) {
 	}
 
 	permission := t.guard.CheckPath(path, "edit")
+	if autoModeEnabled(t.permissionRequester) {
+		permission = t.guard.CheckAutoPath(path, "edit")
+	}
 	if permission == filesystem.PermissionDenied {
 		return nil, fmt.Errorf("permission denied by policy: path %q is blocked", path)
 	}
@@ -206,6 +209,7 @@ func (t *EditFileTool) Execute(ctx context.Context, input any) (any, error) {
 	}
 
 	t.diffEmitter.EmitDiff(computeEditDiff(oldContent, newContent))
+	autoApproved := false
 
 	if permission == filesystem.PermissionPending {
 		if t.permissionRequester == nil {
@@ -218,8 +222,36 @@ func (t *EditFileTool) Execute(ctx context.Context, input any) (any, error) {
 		if !allowed {
 			return nil, fmt.Errorf("permission denied by user: edit access rejected for path %q", path)
 		}
+	} else if permission == filesystem.PermissionGranted {
+		diff := computeEditDiff(oldContent, newContent)
+		decision, reviewErr := reviewOperation(ctx, t.permissionRequester, Operation{Kind: EditFileToolName, Path: resolvedPath, Content: formatEditDiff(diff), Exists: true, Bytes: len(finalContent)})
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if reviewErr != nil || decision != OperationReviewApproved {
+			if t.permissionRequester == nil {
+				return nil, fmt.Errorf("permission denied: user approval required but not available")
+			}
+			allowed, err := requestManualPermission(ctx, t.permissionRequester, t.Name(), path, resolvedPath, false)
+			if err != nil {
+				return nil, fmt.Errorf("permission request failed: %w", err)
+			}
+			if !allowed {
+				return nil, fmt.Errorf("permission denied by user: edit access rejected for path %q", path)
+			}
+		} else if decision == OperationReviewApproved && !fileStateMatches(resolvedPath, oldContent, true) {
+			return nil, fmt.Errorf("file changed during approval review")
+		} else {
+			autoApproved = true
+		}
 	}
 
+	if autoApproved && t.guard.CheckAutoPath(path, "edit") != filesystem.PermissionGranted {
+		return nil, fmt.Errorf("permission denied: target changed and requires user approval")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := writeFileAtomic(resolvedPath, finalContent); err != nil {
 		return nil, err
 	}
@@ -274,4 +306,14 @@ func computeEditDiff(oldContent, newContent string) []EditDiffLine {
 		}
 	}
 	return out
+}
+
+func formatEditDiff(lines []EditDiffLine) string {
+	var change strings.Builder
+	for _, line := range lines {
+		change.WriteString(fmt.Sprint(line.Kind))
+		change.WriteString(line.Content)
+		change.WriteByte('\n')
+	}
+	return change.String()
 }
