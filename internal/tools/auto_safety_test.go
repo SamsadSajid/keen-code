@@ -148,6 +148,23 @@ func TestAutoSafetyCancellationPreventsApprovedWrite(t *testing.T) {
 	}
 }
 
+func TestAutoSafetyBashReviewErrorCannotGrantApproval(t *testing.T) {
+	root := t.TempDir()
+	requester := &safetyReviewRequester{
+		auto: true, decision: OperationReviewApproved,
+		reviewErr: errors.New("review failed after a partial result"),
+	}
+	_, err := NewBashTool(filesystem.NewGuard(root, nil), requester).Execute(context.Background(), map[string]any{
+		"command": "printf marker > must-not-exist.txt",
+	})
+	if err == nil || requester.manualPrompts != 1 {
+		t.Fatal("review error did not require manual approval")
+	}
+	if _, err := os.Stat(filepath.Join(root, "must-not-exist.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed review allowed a shell effect: %v", err)
+	}
+}
+
 func TestAutoSafetySymlinkSwapPreventsExternalWrite(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	insidePath := filepath.Join(root, "target.txt")

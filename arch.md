@@ -111,3 +111,7 @@ Use [the verification plan](design/verification.md). Tests must cover the
 subagent boundary, all operation paths, fallback behavior, and mode changes.
 The baseline test run passed all 1,935 tests before implementation. Tests need
 permission to open local HTTP servers in this development environment.
+
+The final race-enabled test run passed 2,006 tests in 39 packages. Build, vet,
+format, and whitespace checks passed. See the verification plan for the
+requirement evidence and test limits.

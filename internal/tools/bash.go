@@ -173,7 +173,7 @@ func (t *BashTool) Execute(ctx context.Context, input any) (any, error) {
 		if err != nil && ctx.Err() != nil {
 			return nil, err
 		}
-		if (autoReview && decision != OperationReviewApproved) || (!autoReview && decision == OperationReviewAskUser) {
+		if err != nil || (autoReview && decision != OperationReviewApproved) || (!autoReview && decision == OperationReviewAskUser) {
 			if t.permissionRequester == nil {
 				return nil, fmt.Errorf("permission denied: user approval required but not available")
 			}

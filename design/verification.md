@@ -40,3 +40,35 @@ Run the Go test suite with the race detector. Run `go build ./...`,
 final diff for credentials, transcripts, unrelated files, and whitespace
 errors. Commit only the intended files. Push the branch. Make one PR creation
 attempt. Record the result.
+
+## Final results
+
+Checks on 22 September 2026 passed:
+
+- `go test -race ./...`: 2,006 tests passed in 39 packages.
+- `go build ./...` and `go vet ./...`: passed.
+- `gofmt -l .`: no files reported.
+- `git diff --check`: passed.
+- The HTML design document passed the available Tidy markup check.
+
+The browser connection was unavailable. No visual browser check was possible.
+Provider tests use controlled responses. They do not measure live model cost
+or classification accuracy.
+
+## Requirement evidence
+
+| Requirement | Evidence |
+| --- | --- |
+| Learn the code and compare four designs | `auto-approval-approaches.html` includes the code map and four options. |
+| Independent Terra reviews at medium effort | `review-security.md`, `review-architecture.md`, and `review-cost.md` record the reviews. |
+| Select and document a design | `../arch.md` records option B, the review decisions, and the trade-offs. |
+| Implement on a branch from main | `feat/96-auto-approval` starts at main commit `8d63d7d`. |
+| Keep the review context small | `internal/approval/reviewer_test.go` checks the two-message boundary, limits, and disabled tools. |
+| Use manual fallback on review failure | Reviewer and tool tests cover invalid output, errors, cancellation, and denied effects. |
+| Consider risky file operations | Filesystem and tool tests cover sensitive paths, external paths, symlinks, and changed file state. |
+| Apply policy to delegated tools | `internal/subagents/auto_policy_test.go` checks reads, writes, Bash, and MCP. |
+| Reject stale permission responses | `requester_auto_test.go` checks cancellation, request IDs, concurrency, and mode changes. |
+| Stop disabled tool calls in every provider | The six provider test files check that no tool or follow-up request runs. |
+| Provide usage instructions | `../docs.md` explains commands, limits, and manual review. |
+
+Test paths in this table are relative to the repository root.
